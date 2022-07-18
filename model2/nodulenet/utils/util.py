@@ -345,6 +345,8 @@ def crop_boxes2mask_single(crop_boxes, masks, img_reso):
 
         m = masks[i]
         D_c, H_c, W_c = m.shape
+
+        # Directly slicing operaion caused error in ONNX model
         m = torch.where(m>0.5, i+1, 0)
         mask[z_start:z_end, y_start:y_end, x_start:x_end] = m
         # mask[z_start:z_end, y_start:y_end, x_start:x_end][m > 0.5] = i + 1
