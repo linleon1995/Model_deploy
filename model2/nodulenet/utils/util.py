@@ -336,9 +336,8 @@ def crop_boxes2mask_single(crop_boxes, masks, img_reso):
     img_reso: tuple with 3 elements, shape of the image or target resolution of the mask
     """
     D, H, W = img_reso
-    # TODO: change the mask assigning way
     # mask = np.zeros((D, H, W))
-    mask = torch.zeros((2, D, H, W))
+    mask = torch.zeros((D, H, W))
     for i in range(len(crop_boxes)):
         z_start, y_start, x_start, z_end, y_end, x_end, cat = crop_boxes[i]
 
@@ -346,7 +345,9 @@ def crop_boxes2mask_single(crop_boxes, masks, img_reso):
 
         m = masks[i]
         D_c, H_c, W_c = m.shape
-        mask[i, z_start:z_end, y_start:y_end, x_start:x_end][m > 0.5] = i + 1
+        m = torch.where(m>0.5, i+1, 0)
+        mask[z_start:z_end, y_start:y_end, x_start:x_end] = m
+        # mask[z_start:z_end, y_start:y_end, x_start:x_end][m > 0.5] = i + 1
     
     return mask
 

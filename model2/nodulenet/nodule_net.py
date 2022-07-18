@@ -375,8 +375,8 @@ class NoduleNet(nn.Module):
 
         b,D,H,W,_,num_class = self.rpn_logits_flat.shape
 
-        self.rpn_logits_flat = self.rpn_logits_flat.view(b, -1, 1);#print('rpn_logit ', self.rpn_logits_flat.shape)
-        self.rpn_deltas_flat = self.rpn_deltas_flat.view(b, -1, 6);#print('rpn_delta ', self.rpn_deltas_flat.shape)
+        self.rpn_logits_flat = self.rpn_logits_flat.view(b, -1, 1) #print('rpn_logit ', self.rpn_logits_flat.shape)
+        self.rpn_deltas_flat = self.rpn_deltas_flat.view(b, -1, 6) #print('rpn_delta ', self.rpn_deltas_flat.shape)
 
 
         self.rpn_window    = make_rpn_windows(fs, self.cfg)
@@ -485,7 +485,7 @@ class NoduleNet(nn.Module):
                     self.rcnn_logits, self.rcnn_deltas
                 ) 
 
-            pred_mask = np.zeros(list(inputs.shape[2:]))
+            # pred_mask = np.zeros(list(inputs.shape[2:]))
             # print('rrr', self.use_mask,  len(self.detections), inputs.shape, pred_mask.shape)
             if self.use_mask and len(self.detections):
                 # keep batch index, z, y, x, d, h, w, class
@@ -511,6 +511,8 @@ class NoduleNet(nn.Module):
                 # segments = [torch.sigmoid(m).cpu().numpy() > 0.5 for m in self.mask_probs]
                 segments = [torch.sigmoid(m) > 0.5 for m in self.mask_probs]
                 pred_mask = crop_boxes2mask_single(self.crop_boxes[:, 1:], segments, inputs.shape[2:])
+        # TODO: correctly get the num_class and batch size dimension
+        pred_mask = pred_mask[None, None]
         return pred_mask
 
     def forward2(self, inputs, bboxes):

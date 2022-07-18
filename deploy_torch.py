@@ -1,3 +1,4 @@
+from email.policy import strict
 import onnx
 import onnxruntime
 import torch
@@ -8,6 +9,7 @@ import numpy as np
 from torch import nn
 import torch.onnx
 # import tensorrt as trt
+from model2.nodulenet.utils.util import crop_boxes2mask_single, pad2factor
 
 
 
@@ -26,12 +28,12 @@ def torch_to_ONNX_3d(dummy_input, model, save_filename):
                     dummy_input,                         # model input (or a tuple for multiple inputs)
                     save_filename,   # where to save the model (can be a file or file-like object)
                     export_params=True,        # store the trained parameter weights inside the model file
-                    opset_version=11,          # the ONNX version to export the model to
+                    opset_version=13,          # the ONNX version to export the model to
                     do_constant_folding=True,  # whether to execute constant folding for optimization
                     input_names = ['input'],   # the model's input names
                     output_names = ['output'], # the model's output names
-                    dynamic_axes={'input' : {0: 'batch_size', 2 : 'depth', 3: 'height', 4: 'width'},    # variable length axes
-                                  'output' : {1: 'depth', 2: 'height', 3: 'width'}})
+                    dynamic_axes={'input' : {1: 'channel', 2 : 'depth', 3: 'height', 4: 'width'},    # variable length axes
+                                  'output' : {1: 'num_class', 2: 'depth', 3: 'height', 4: 'width'}})
 
 
     onnx_model = onnx.load(save_filename)
@@ -47,7 +49,23 @@ def torch_to_ONNX_3d(dummy_input, model, save_filename):
     ort_outs = ort_session.run(None, ort_inputs)
 
     # compare ONNX Runtime and PyTorch results
-    np.testing.assert_allclose(to_numpy(torch_out), ort_outs[0], rtol=1e-03, atol=1e-05)
+    # np.testing.assert_allclose(to_numpy(torch_out), ort_outs[0], rtol=1e-03, atol=1e-05)
+    error = to_numpy(torch_out) - ort_outs[0]
+    
+    import matplotlib.pyplot as plt
+    for idx, (t_out, o_out) in enumerate(zip(to_numpy(torch_out)[0, 0], ort_outs[0][0, 0])):
+        if np.sum(t_out) or np.sum(o_out):
+            print(idx)
+            fig, ax = plt.subplots(1, 2)
+            ax[0].imshow(t_out)
+            ax[1].imshow(o_out)
+            ax[0].set_title('torch')
+            ax[1].set_title('onnx')
+            fig.savefig(f'plot/{idx}.png')
+
+    print(error.max(), error.min(), np.abs(error).sum())
+    # np.testing.assert_allclose(to_numpy(torch_out), ort_outs[0], rtol=1e-03)
+    np.testing.assert_allclose(to_numpy(torch_out), ort_outs[0], rtol=1e-03, atol=1e-5)
     # np.testing.assert_allclose(to_numpy(torch_out), ort_outs[0], rtol=10, atol=1e-01)
 
     print("Exported model has been tested with ONNXRuntime, and the result looks good!")
@@ -258,7 +276,7 @@ def prepare_model(net, config):
     net = net.cuda()
     initial_checkpoint = config['initial_checkpoint']
     checkpoint = torch.load(initial_checkpoint)
-    net.load_state_dict(checkpoint['state_dict'])
+    net.load_state_dict(checkpoint['state_dict'], strict=False)
     net.set_mode('eval')
     net.use_mask = True
     net.use_rcnn = True
@@ -296,12 +314,14 @@ def main2():
     itkimage = sitk.ReadImage('11029688907433245392075633136616444_clean.nrrd')
     dummy_input = sitk.GetArrayFromImage(itkimage)
     # dummy_input = dummy_input[:128, :128, :128]
-    dummy_input = dummy_input[64:192, 64:192, 64:192]
+    dummy_input, pad = pad2factor(dummy_input)
+
+    # dummy_input = dummy_input[64:192, 64:193, 64:194]
     # dummy_input = dummy_input[:256, :128, :256]
     dummy_input = (dummy_input.astype(np.float32) - 128.) / 128.
     print(dummy_input.min(), dummy_input.max())
     dummy_input = dummy_input[np.newaxis, np.newaxis]
-    dummy_input = np.tile(dummy_input, (2, 1, 1, 1, 1))
+    # dummy_input = np.tile(dummy_input, (2, 1, 1, 1, 1))
     dummy_input = torch.from_numpy(dummy_input).cuda()
 
     print(time.ctime(time.time()))
@@ -323,7 +343,7 @@ def main2():
     #     print('good')
     
     with torch.no_grad():
-        onnx_model = torch_to_ONNX_3d(dummy_input, torch_model, "nodulenet.onnx")
+        onnx_model = torch_to_ONNX_3d(dummy_input, torch_model, "nodulenet_slicing.onnx")
 
 
 
