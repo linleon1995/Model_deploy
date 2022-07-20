@@ -11,7 +11,8 @@ except ImportError:
     from model2.nodulenet.utils.util import py_nms as torch_nms
     from model2.nodulenet.utils.util import py_box_overlap as torch_overlap
 
-def make_rpn_windows(f, cfg):
+
+def make_rpn_windows_np(f, cfg):
     """
     Generating anchor boxes at each voxel on the feature map,
     the center of the anchor box on each voxel corresponds to center
@@ -35,6 +36,38 @@ def make_rpn_windows(f, cfg):
 
     return windows
 
+
+def make_rpn_windows(f, cfg):
+    """
+    Generating anchor boxes at each voxel on the feature map,
+    the center of the anchor box on each voxel corresponds to center
+    on the original input image.
+
+    return
+    windows: list of anchor boxes, [z, y, x, d, h, w]
+    """
+    stride = cfg['stride']
+    # anchors = np.asarray(cfg['anchors'])
+    anchors = torch.FloatTensor(cfg['anchors'])
+    offset = (float(stride) - 1) / 2
+    _, _, D, H, W = f.shape
+    oz = torch.arange(offset, offset + stride * (D - 1) + 1, stride)
+    oh = torch.arange(offset, offset + stride * (H - 1) + 1, stride)
+    ow = torch.arange(offset, offset + stride * (W - 1) + 1, stride)
+
+    x1 = torch.meshgrid([oz, oh, ow, anchors[:,0]])
+    x2 = torch.meshgrid([oz, oh, ow, anchors[:,1]])
+    x3 = torch.meshgrid([oz, oh, ow, anchors[:,2]])
+
+    x1 = [x.contiguous().view(-1) for x in x1]
+    anchors1 = x2[-1].contiguous().view(-1)
+    anchors2 = x3[-1].contiguous().view(-1)
+
+    x1.extend([anchors1, anchors2])
+    windows = torch.stack(x1, dim=1)
+    return windows
+
+
 def rpn_nms(cfg, mode, inputs, window, logits_flat, deltas_flat):
     if mode in ['train',]:
         nms_pre_score_threshold = cfg['rpn_train_nms_pre_score_threshold']
@@ -48,13 +81,16 @@ def rpn_nms(cfg, mode, inputs, window, logits_flat, deltas_flat):
         raise ValueError('rpn_nms(): invalid mode = %s?'%mode)
 
 
-    logits = torch.sigmoid(logits_flat).data.cpu().numpy()
-    deltas = deltas_flat.data.cpu().numpy()
+    logits = torch.sigmoid(logits_flat)
+    deltas = deltas_flat
+    # logits = torch.sigmoid(logits_flat).data.cpu().numpy()
+    # deltas = deltas_flat.data.cpu().numpy()
     batch_size, _, depth, height, width = inputs.size()
 
     proposals = []
     for b in range(batch_size):
-        proposal = [np.empty((0, 8),np.float32),]
+        proposal = [torch.empty((0, 8)).float()]
+        # proposal = [torch.empty((0, 8),np.float32),]
 
         ps = logits[b, : , 0].reshape(-1, 1)
         ds = deltas[b, :, :]
@@ -69,29 +105,35 @@ def rpn_nms(cfg, mode, inputs, window, logits_flat, deltas_flat):
             box = rpn_decode(w, d, cfg['box_reg_weight'])
             box = clip_boxes(box, inputs.shape[2:])
 
-            output = np.concatenate((p, box),1)
+            output = torch.cat((p, box), 1)
+            # output = np.concatenate((p, box),1)
 
-            output = torch.from_numpy(output)
+            # output = torch.from_numpy(output)
             output, keep = torch_nms(output, nms_overlap_threshold)
 
-            prop = np.zeros((len(output), 8),np.float32)
+            prop = torch.zeros((output.shape[0], 8)).float()
+            # prop = np.zeros((output.shape[0], 8),np.float32)
             prop[:, 0] = b
             prop[:, 1:8] = output
             
             proposal.append(prop)
 
-        proposal = np.vstack(proposal)
+        proposal = torch.vstack(proposal)
+        # proposal = np.vstack(proposal)
         proposals.append(proposal)
 
-    proposals = np.vstack(proposals)
+    proposals = torch.vstack(proposals)
+    # proposals = np.vstack(proposals)
 
     # Just in case if there is no proposal, we still return a Tensor,
     # torch.from_numpy() cannot take input with 0 dim
-    if len(proposals) != 0:
-        proposals = Variable(torch.from_numpy(proposals)).cuda()
+    if proposals.shape[0] != 0:
+        proposals = Variable(proposals)
+        # proposals = Variable(torch.from_numpy(proposals)).cuda()
         return proposals
     else:
-        return Variable(torch.rand([0, 8])).cuda()
+        return Variable(torch.rand([0, 8]))
+        # return Variable(torch.rand([0, 8])).cuda()
 
     return proposals
 

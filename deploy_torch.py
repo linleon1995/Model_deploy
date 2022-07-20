@@ -54,8 +54,8 @@ def NoduleNet_to_ONNX():
     dummy_input = torch.ones(1, 1, 64, 64, 64).cuda()
     dummy_input2 = torch.randn(1, 1, 64, 64, 64, requires_grad=True).cuda()
 
-    # itkimage = sitk.ReadImage('17004765014077857895660775392470716_clean.nrrd')
-    itkimage = sitk.ReadImage('11029688907433245392075633136616444_clean.nrrd')
+    itkimage = sitk.ReadImage('17004765014077857895660775392470716_clean.nrrd')
+    # itkimage = sitk.ReadImage('11029688907433245392075633136616444_clean.nrrd')
     dummy_input = sitk.GetArrayFromImage(itkimage)
     # dummy_input = dummy_input[:128, :128, :128]
     dummy_input, pad = pad2factor(dummy_input)
@@ -66,15 +66,16 @@ def NoduleNet_to_ONNX():
     print(dummy_input.min(), dummy_input.max())
     dummy_input = dummy_input[np.newaxis, np.newaxis]
     # dummy_input = np.tile(dummy_input, (2, 1, 1, 1, 1))
-    dummy_input = torch.from_numpy(dummy_input).cuda()
+    # dummy_input = torch.from_numpy(dummy_input).cuda()
+    # dummy_input = torch.from_numpy(dummy_input)
 
     print(time.ctime(time.time()))
     
     torch_model = NoduleNet(config)
-    torch_model = prepare_model(torch_model, config, use_cuda=True)
+    torch_model = prepare_model(torch_model, config, use_cuda=False)
     
     with torch.no_grad():
-        onnx_model = torch_to_ONNX_3d(dummy_input, torch_model, "nodulenet.onnx")
+        onnx_model = torch_to_ONNX_3d(dummy_input, torch_model, "nodulenet_v2.onnx")
 
 
 def NoduleCls_to_ONNX():

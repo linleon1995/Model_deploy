@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 
 
 def box_transform(windows, targets, weight):
@@ -25,7 +26,52 @@ def box_transform(windows, targets, weight):
     return deltas
 
 
+
 def box_transform_inv(windows, deltas, weight):
+    """
+    Apply regression terms to predicted bboxes
+    windows: [num_window, z, y, x, D, H, W]
+    targets: [num_target, z, y, x, D, H, W]
+    """
+    num  = windows.shape[0]
+    wz, wy, wx, wd, wh, ww = weight
+    predictions = torch.zeros((num, 6)).int()
+
+    bz, by, bx = windows[:, 0], windows[:, 1], windows[:, 2]
+    bd, bh, bw = windows[:, 3], windows[:, 4], windows[:, 5]
+    bz = bz[:, None]
+    by = by[:, None]
+    bx = bx[:, None]
+    bd = bd[:, None]
+    bh = bh[:, None]
+    bw = bw[:, None]
+
+    dz = deltas[:, 0::6] / wz
+    dy = deltas[:, 1::6] / wy
+    dx = deltas[:, 2::6] / wx
+    dd = deltas[:, 3::6] / wd
+    dh = deltas[:, 4::6] / wh
+    dw = deltas[:, 5::6] / ww
+
+    z = dz * bd + bz
+    y = dy * bh + by
+    x = dx * bw + bx
+    
+    d = torch.exp(dd) * bd
+    h = torch.exp(dh) * bh
+    w = torch.exp(dw) * bw
+
+    predictions[:, 0::6] = z
+    predictions[:, 1::6] = y
+    predictions[:, 2::6] = x 
+    predictions[:, 3::6] = d
+    predictions[:, 4::6] = h
+    predictions[:, 5::6] = w
+
+    return predictions
+
+
+def box_transform_inv_np(windows, deltas, weight):
     """
     Apply regression terms to predicted bboxes
     windows: [num_window, z, y, x, D, H, W]
@@ -70,6 +116,18 @@ def box_transform_inv(windows, deltas, weight):
 
 
 def clip_boxes(boxes, img_size):
+    """
+    clip boxes outside the image, all box follows [p, z, y, x, d, h, w]
+    """
+    depth, height, width = img_size
+    boxes[:, 0] = torch.clip(boxes[:, 0], 0, depth  - 1)
+    boxes[:, 1] = torch.clip(boxes[:, 1], 0, height - 1)
+    boxes[:, 2] = torch.clip(boxes[:, 2], 0, width  - 1)
+
+    return boxes
+
+
+def clip_boxes_np(boxes, img_size):
     """
     clip boxes outside the image, all box follows [p, z, y, x, d, h, w]
     """

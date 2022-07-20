@@ -37,5 +37,4 @@ def mask_iou(mask1, mask2):
 
 def mask_logits2probs(mask):
     mask = (torch.sigmoid(mask) > 0.5).cpu().numpy().astype(np.uint8)
-
     return mask

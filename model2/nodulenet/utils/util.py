@@ -141,10 +141,11 @@ def average_precision(labels, y_pred):
 
 def py_nms(dets, thresh):
     # Check the input dtype
-    if isinstance(dets, torch.Tensor):
-        if dets.is_cuda:
-            dets = dets.cpu()
-        dets = dets.data.numpy()
+    # if isinstance(dets, torch.Tensor):
+        # if dets.is_cuda:
+        #     dets = dets.cpu()
+        # dets = dets.data.numpy()
+
         
     z = dets[:, 1]
     y = dets[:, 2]
@@ -155,29 +156,32 @@ def py_nms(dets, thresh):
     scores = dets[:, 0]
 
     areas = d * h * w
-    order = scores.argsort()[::-1]
+    order = torch.flip(scores.argsort(), dims=(0,))
     keep = []
-    while order.size > 0:
+    while order.shape[0] > 0:
         i = order[0]
         keep.append(i)
 
-        xx0 = np.maximum(x[i] - w[i] / 2., x[order[1:]] - w[order[1:]] / 2.)
-        yy0 = np.maximum(y[i] - h[i] / 2., y[order[1:]] - h[order[1:]] / 2.)
-        zz0 = np.maximum(z[i] - d[i] / 2., z[order[1:]] - d[order[1:]] / 2.)
-        xx1 = np.minimum(x[i] + w[i] / 2., x[order[1:]] + w[order[1:]] / 2.)
-        yy1 = np.minimum(y[i] + h[i] / 2., y[order[1:]] + h[order[1:]] / 2.)
-        zz1 = np.minimum(z[i] + d[i] / 2., z[order[1:]] + d[order[1:]] / 2.)
+        aa = x[order[1:]] - w[order[1:]] / 2.
+        bb = x[i] - w[i] / 2.
+        cc = bb[None]
+        xx0 = torch.max(torch.cat((x[i:i+1] - w[i:i+1] / 2., x[order[1:]] - w[order[1:]] / 2.)))
+        yy0 = torch.max(torch.cat((y[i:i+1] - h[i:i+1] / 2., y[order[1:]] - h[order[1:]] / 2.)))
+        zz0 = torch.max(torch.cat((z[i:i+1] - d[i:i+1] / 2., z[order[1:]] - d[order[1:]] / 2.)))
+        xx1 = torch.min(torch.cat((x[i:i+1] + w[i:i+1] / 2., x[order[1:]] + w[order[1:]] / 2.)))
+        yy1 = torch.min(torch.cat((y[i:i+1] + h[i:i+1] / 2., y[order[1:]] + h[order[1:]] / 2.)))
+        zz1 = torch.min(torch.cat((z[i:i+1] + d[i:i+1] / 2., z[order[1:]] + d[order[1:]] / 2.)))
 
-        inter_w = np.maximum(0.0, xx1 - xx0)
-        inter_h = np.maximum(0.0, yy1 - yy0)
-        inter_d = np.maximum(0.0, zz1 - zz0)
+        inter_w = torch.max(torch.FloatTensor((0.0, xx1 - xx0)))
+        inter_h = torch.max(torch.FloatTensor((0.0, yy1 - yy0)))
+        inter_d = torch.max(torch.FloatTensor((0.0, zz1 - zz0)))
         intersect = inter_w * inter_h * inter_d
         overlap = intersect / (areas[i] + areas[order[1:]] - intersect)
 
-        inds = np.where(overlap <= thresh)[0]
+        inds = torch.where(overlap <= thresh)[0]
         order = order[inds + 1]
 
-    return torch.from_numpy(dets[keep]), torch.LongTensor(keep)
+    return dets[keep], torch.LongTensor(keep)
 
 
 def py_box_overlap(boxes1, boxes2):

@@ -40,9 +40,9 @@ def rcnn_nms(cfg, mode, inputs, proposals, logits, deltas):
     num_class = cfg['num_class']
 
     # probs     = np_sigmoid(logits.cpu().data.numpy())
-    probs = F.softmax(logits, dim=1).cpu().data.numpy()
-    deltas = deltas.cpu().data.numpy().reshape(-1, num_class, 6)
-    proposals = proposals.cpu().data.numpy()
+    probs = F.softmax(logits, dim=1)
+    deltas = deltas.reshape(-1, num_class, 6)
+    # proposals = proposals
     # masks = (F.sigmoid(mask_logits).cpu().data.numpy() > 0.5).astype(np.uint8)
 
     #non-max suppression
@@ -50,9 +50,9 @@ def rcnn_nms(cfg, mode, inputs, proposals, logits, deltas):
     # segments = []
     keeps = []
     for b in range(batch_size):
-        detection = [np.empty((0, 9), np.float32),]
+        detection = [torch.empty((0, 9)).float()]
 
-        index = np.where(proposals[:,0] == b)[0]
+        index = torch.where(proposals[:,0] == b)[0]
         if len(index)>0:
             prob  = probs[index]
             delta = deltas[index]
@@ -61,9 +61,9 @@ def rcnn_nms(cfg, mode, inputs, proposals, logits, deltas):
             # cats = np.argmax(prob, 1)
 
             for j in range(1, num_class): #skip background
-                idx = np.where(prob[:, j] > nms_pre_score_threshold)[0]
+                idx = torch.where(prob[:, j] > nms_pre_score_threshold)[0]
                 # idx = np.where(cats == j)[0]
-                if len(idx)>0:
+                if idx.shape[0] > 0:
                     p = prob[idx, j].reshape(-1, 1)
                     d = delta[idx, j]
                     # m = mask[idx, j - 1]
@@ -76,28 +76,30 @@ def rcnn_nms(cfg, mode, inputs, proposals, logits, deltas):
                     # if num>0:
                         # box  = box[keep]
                         # p    = p[keep]
-                    js = np.expand_dims(np.array([j] * len(p)), axis=-1)
-                    output = np.concatenate((p, box, js), 1)
+                    # js = np.expand_dims(np.array([j] * len(p)), axis=-1)
+                    js = torch.IntTensor([j] * p.shape[0]).unsqueeze(-1)
+                    output = torch.cat((p, box, js), 1).float()
 
-                    if len(output) > 0:
-                        output = torch.from_numpy(output).float()
+                    if output.shape[0] > 0:
+                        # output = torch.from_numpy(output).float()
                         output, keep = torch_nms(output, nms_overlap_threshold)
 
-                    num = len(output)
+                    num = output.shape[0]
 
                     if num > 0:
-                        det = np.zeros((num, 9),np.float32)
+                        det = torch.zeros((num, 9)).float()
                         det[:, 0] = b
                         det[:, 1:] = output
                         detection.append(det)
                         # segments.append(m[keep.numpy()])
                         keeps.extend(index[idx[keep.numpy()]].tolist())
 
-        detection = np.vstack(detection)
+        detection = torch.vstack(detection)
 
         detections.append(detection)
 
-    detections = Variable(torch.from_numpy(np.vstack(detections))).cuda()
+    detections = Variable(torch.vstack(detections))
+    # detections = Variable(torch.from_numpy(np.vstack(detections))).cuda()
     # segments = np.vstack(segments)
     return detections, keeps
 

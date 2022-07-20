@@ -320,28 +320,38 @@ class CropRoi(nn.Module):
 
         crops = []
         for p in proposals:
-            b = int(p[0])
+            b = p[0].int()
             center = p[2:5]
             side_length = p[5:8]
             c0 = center - side_length / 2 # left bottom corner
             c1 = c0 + side_length # right upper corner
             c0 = (c0 / self.scale).floor().long()
             c1 = (c1 / self.scale).ceil().long()
-            minimum = torch.LongTensor([[0, 0, 0]]).cuda()
-            maximum = torch.LongTensor(
-                np.array([[self.DEPTH, self.HEIGHT, self.WIDTH]]) / self.scale).cuda()
+            minimum = torch.LongTensor([0, 0, 0])
+            maximum = torch.LongTensor([self.DEPTH, self.HEIGHT, self.WIDTH])
+            maximum = maximum / self.scale
+            # maximum = torch.LongTensor(
+            #     np.array([[self.DEPTH, self.HEIGHT, self.WIDTH]]) / self.scale)
+            # minimum = torch.LongTensor([[0, 0, 0]]).cuda()
+            # maximum = torch.LongTensor(
+            #     np.array([[self.DEPTH, self.HEIGHT, self.WIDTH]]) / self.scale).cuda()
 
-            c0 = torch.cat((c0.unsqueeze(0), minimum), 0)
-            c1 = torch.cat((c1.unsqueeze(0), maximum), 0)
+            c0 = torch.stack((c0, minimum), 0)
+            c1 = torch.stack((c1, maximum), 0)
             c0, _ = torch.max(c0, 0)
             c1, _ = torch.min(c1, 0)
 
-            # Slice 0 dim, should never happen
-            if np.any((c1 - c0).cpu().data.numpy() < 1):
-                print(p)
-                print('c0:', c0, ', c1:', c1)
-                # TODO: Leon
-                continue
+            # TODO:
+            c0 = np.int32(c0.cpu().data.numpy())
+            c1 = np.int32(c1.cpu().data.numpy())
+
+            # TODO: should get correct c0, c1 at first to avoid if-else statement
+            # # Slice 0 dim, should never happen
+            # if torch.any((c1 - c0).cpu().data.numpy() < 1):
+            #     print(p)
+            #     print('c0:', c0, ', c1:', c1)
+            #     # TODO: Leon
+            #     continue
             crop = f[b, :, c0[0]:c1[0], c0[1]:c1[1], c0[2]:c1[2]]
             crop = F.adaptive_max_pool3d(crop, self.rcnn_crop_size)
             crops.append(crop)
@@ -406,7 +416,7 @@ class NoduleNet(nn.Module):
         self.mask_probs, self.mask_targets = [], []
         self.crop_boxes = []
         if self.use_rcnn:
-            if len(self.rpn_proposals) > 0:
+            if self.rpn_proposals.shape[0] > 0:
                 rcnn_crops = self.rcnn_crop(feat_4, inputs, self.rpn_proposals)
                 self.rcnn_logits, self.rcnn_deltas = data_parallel(self.rcnn_head, rcnn_crops)
                 self.detections, self.keeps = rcnn_nms(self.cfg, self.mode, inputs, self.rpn_proposals, 
@@ -486,7 +496,6 @@ class NoduleNet(nn.Module):
                 ) 
 
             # pred_mask = np.zeros(list(inputs.shape[2:]))
-            # print('rrr', self.use_mask,  len(self.detections), inputs.shape, pred_mask.shape)
             if self.use_mask and len(self.detections):
                 # keep batch index, z, y, x, d, h, w, class
                 if len(self.detections):

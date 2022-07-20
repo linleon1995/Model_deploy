@@ -13,6 +13,7 @@ def torch_to_ONNX_3d(dummy_input, model, save_filename):
     model.eval()
 
     # Input to the model
+    dummy_input = torch.from_numpy(dummy_input)
     torch_out = model(dummy_input)
 
     # # Export the model
