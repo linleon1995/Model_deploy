@@ -31,8 +31,9 @@ def ONNX_inference3():
     print(prob)
 
 
-def prepare_model(net, config):
-    net = net.cuda()
+def prepare_model(net, config, use_cuda=True):
+    if use_cuda:
+        net = net.cuda()
     initial_checkpoint = config['initial_checkpoint']
     checkpoint = torch.load(initial_checkpoint)
     net.load_state_dict(checkpoint['state_dict'], strict=False)
@@ -43,23 +44,6 @@ def prepare_model(net, config):
 
 
 def NoduleNet_to_ONNX():
-    # import sys
-    # f = rf"C:\Users\test\Desktop\Leon\Projects\Slicer_modules\nodule_extension\slicer-plugin\NvidiaAIAA"
-    # sys.path.append(f)
-    # from model2.nodulenet.nodule_net import NoduleNet
-    # from model2.nodulenet.config import config
-
-    # dummy_input = torch.ones(1, 1, 64, 64, 64).cuda()
-    # # dummy_input = torch.randn(1, 1, 64, 64, 64, requires_grad=True).cuda()
-    # torch_model = NoduleNet(config)
-    # torch_model = torch_model.cuda()
-    # torch_model.use_mask = True
-    # torch_model.use_rcnn = True
-    # torch_model.eval()
-    # with torch.no_grad():
-    #     output = torch_model.inference(dummy_input)
-    # np.save('test_same.npy', output)
-    
     
     from model2.nodulenet.nodule_net import NoduleNet
     from model2.nodulenet.config import config
@@ -70,6 +54,7 @@ def NoduleNet_to_ONNX():
     dummy_input = torch.ones(1, 1, 64, 64, 64).cuda()
     dummy_input2 = torch.randn(1, 1, 64, 64, 64, requires_grad=True).cuda()
 
+    # itkimage = sitk.ReadImage('17004765014077857895660775392470716_clean.nrrd')
     itkimage = sitk.ReadImage('11029688907433245392075633136616444_clean.nrrd')
     dummy_input = sitk.GetArrayFromImage(itkimage)
     # dummy_input = dummy_input[:128, :128, :128]
@@ -86,24 +71,10 @@ def NoduleNet_to_ONNX():
     print(time.ctime(time.time()))
     
     torch_model = NoduleNet(config)
-    torch_model = prepare_model(torch_model, config)
-    # torch_model = torch_model.cuda()
-    # torch_model.use_mask = True
-    # torch_model.use_rcnn = True
-    # torch_model.eval()
-
-    # with torch.no_grad():
-    #     output = torch_model(dummy_input)
-    # print(time.ctime(time.time()))
-    # # np.save('test_same.npy', output)
-
-    # history = np.load('test_same.npy')
-    # if np.all(history == output):
-    #     print('good')
+    torch_model = prepare_model(torch_model, config, use_cuda=True)
     
     with torch.no_grad():
-        onnx_model = torch_to_ONNX_3d(dummy_input, torch_model, "nodulenet_slicing.onnx")
-
+        onnx_model = torch_to_ONNX_3d(dummy_input, torch_model, "nodulenet.onnx")
 
 
 def NoduleCls_to_ONNX():
@@ -134,7 +105,7 @@ def timer_func(func):
     return wrap_func
 
 
-def main():
+def nodule_cls_main():
     # Nodule cls
     f = rf'C:\Users\test\Desktop\Leon\Datasets\TMH_Nodule-preprocess\nodulenet\crop_old\positive\Image'
     f_list = glob.glob(os.path.join(f, '*.npy'))
@@ -149,13 +120,13 @@ def main():
     model_builder = NoduleClassifier((32, 64, 64), checkpoint_path=ckpt, using_cuda=False)
     torch_model = model_builder.classifier
     torch_model.eval()
+
     onnx_total_time = []
     torch_total_time = []
     total_error = []
-
     for idx, filename in enumerate(f_list):
-        if idx%100 == 0 and idx>0:
-            print(idx)
+        # if idx%100 == 0 and idx>0:
+        #     print(idx)
         crop = np.load(os.path.join(f, filename))
         crop = np.tile(crop[np.newaxis, np.newaxis], (1,3,1,1,1))
         crop_tensor = torch.from_numpy(crop)
@@ -180,13 +151,86 @@ def main():
         total_error.append(error)
 
     print('--')
-    print(f'ONNX execution time {np.mean(onnx_time)} in {len(onnx_time)} cases')
-    print(f'Torch execution time {np.mean(torch_total_time)} in {len(torch_total_time)} cases')
+    onnx_exc_time = np.mean(onnx_total_time)
+    torch_exec_time = np.mean(torch_total_time)
+    print(f'Shape {crop.shape}')
+    print(f'ONNX execution time {onnx_exc_time} in {len(onnx_total_time)} cases')
+    print(f'Torch execution time {torch_exec_time} in {len(torch_total_time)} cases')
+    print(f'ONNX / Torch: {100*((torch_exec_time-onnx_exc_time)/torch_exec_time)} %')
     print(f'Error {np.mean(total_error)} in {len(total_error)} cases')
-    print(f'{error} for {crop.shape}')
+
+
+def nodule_det_main():
+    # Nodule cls
+    f = rf'D:\Leon\Datasets\TMH-preprocess\preprocess_old'
+    f_list = glob.glob(os.path.join(f, '*_clean.nrrd'))
+    # f_list = f_list[:5]
+
+    ort_session = onnxruntime.InferenceSession("nodulenet_slicing.onnx")
+
+    ckpt = '300.pt'
+    import SimpleITK as sitk
+    from model2.nodulenet.nodule_net import NoduleNet
+    from model2.nodulenet.config import config
+    torch_model = NoduleNet(config)
+    torch_model = prepare_model(torch_model, config, use_cuda=False)
+
+    onnx_total_time = []
+    torch_total_time = []
+    total_error = []
+    for idx, filename in enumerate(f_list):
+        # if idx > 4: break
+        if idx%1 == 0:
+            print(idx)
+        itkimage = sitk.ReadImage(os.path.join(f, filename))
+        # itkimage = sitk.ReadImage('11029688907433245392075633136616444_clean.nrrd')
+        inputs = sitk.GetArrayFromImage(itkimage)
+        inputs, pad = pad2factor(inputs)
+        inputs = (inputs.astype(np.float32) - 128.) / 128.
+        inputs = inputs[np.newaxis, np.newaxis]
+        inputs_tensor = torch.from_numpy(inputs)
+        print(inputs.shape)
+
+        # torch
+        @timer_func
+        def torch_nodule_det():
+            torch_out = torch_model(inputs_tensor)
+            return torch_out
+
+        # onnx
+        @timer_func
+        def onnx_nodule_det():
+            try:
+                with torch.no_grad():
+                    onnx_out = ONNX_inference_from_session(inputs, ort_session)
+            except:
+                onnx_out = None
+            return onnx_out
+
+        torch_out, torch_time = torch_nodule_det()
+        onnx_out, onnx_time = onnx_nodule_det()
+        if onnx_out is not None:
+            torch_total_time.append(torch_time)
+            onnx_total_time.append(onnx_time)
+            error = np.sum(np.abs(onnx_out-torch_out.detach().numpy()))
+            total_error.append(error)
+            print(f'--- {filename} Error {error}')
+
+    print('---')
+    onnx_exc_time = np.mean(onnx_total_time)
+    torch_exec_time = np.mean(torch_total_time)
+    print(f'Shape {inputs.shape}')
+    print(f'ONNX execution time {onnx_exc_time} in {len(onnx_total_time)} cases')
+    print(f'Torch execution time {torch_exec_time} in {len(torch_total_time)} cases')
+    print(f'ONNX / Torch: {100*((torch_exec_time-onnx_exc_time)/torch_exec_time)} %')
+    print(f'Error {np.mean(total_error)} in {len(total_error)} cases')
+
+
+def main():
+    # nodule_det_main()
+    # nodule_cls_main()
+    NoduleNet_to_ONNX()
 
 
 if __name__ == '__main__':
-    # NoduleNet_to_ONNX()
-    # ONNX_inference3()
     main()

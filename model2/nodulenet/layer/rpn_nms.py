@@ -24,8 +24,6 @@ def make_rpn_windows(f, cfg):
     anchors = np.asarray(cfg['anchors'])
     offset = (float(stride) - 1) / 2
     _, _, D, H, W = f.shape
-    # TODO:
-    # D, H, W = 32, 32, 32
     oz = np.arange(offset, offset + stride * (D - 1) + 1, stride)
     oh = np.arange(offset, offset + stride * (H - 1) + 1, stride)
     ow = np.arange(offset, offset + stride * (W - 1) + 1, stride)
