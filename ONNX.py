@@ -1,3 +1,5 @@
+
+import os
 import torch
 import onnx
 import onnxruntime
@@ -24,14 +26,14 @@ def torch_to_ONNX_3d(dummy_input, model, save_filename):
 
     # Export the model
     torch.onnx.export(model,               # model being run
-                    dummy_input_t,                         # model input (or a tuple for multiple inputs)
-                    save_filename,   # where to save the model (can be a file or file-like object)
-                    export_params=True,        # store the trained parameter weights inside the model file
-                    opset_version=13,          # the ONNX version to export the model to
-                    do_constant_folding=True,  # whether to execute constant folding for optimization
-                    input_names = ['input'],   # the model's input names
-                    output_names = ['output'], # the model's output names
-                    dynamic_axes={'input' : {1: 'channel', 2 : 'depth', 3: 'height', 4: 'width'},    # variable length axes
+                      dummy_input_t,                         # model input (or a tuple for multiple inputs)
+                      save_filename,   # where to save the model (can be a file or file-like object)
+                      export_params=True,        # store the trained parameter weights inside the model file
+                      opset_version=13,          # the ONNX version to export the model to
+                      do_constant_folding=True,  # whether to execute constant folding for optimization
+                      input_names = ['input'],   # the model's input names
+                      output_names = ['output'], # the model's output names
+                      dynamic_axes={'input' : {1: 'channel', 2 : 'depth', 3: 'height', 4: 'width'},    # variable length axes
                                   'output' : {1: 'num_class', 2: 'depth', 3: 'height', 4: 'width'}})
 
 
@@ -44,6 +46,10 @@ def torch_to_ONNX_3d(dummy_input, model, save_filename):
     # compare ONNX Runtime and PyTorch results
     error = torch_out - ort_outs[0]
     
+    np.random.seed(None)
+    dir_name = str(np.random.randint(100000))
+    save_dir = os.path.join('plot', f'{dir_name}')
+    os.makedirs(save_dir)
     for idx, (t_out, o_out) in enumerate(zip(torch_out[0, 0], ort_outs[0][0, 0])):
         if np.sum(t_out) or np.sum(o_out):
             print(idx)
@@ -52,7 +58,7 @@ def torch_to_ONNX_3d(dummy_input, model, save_filename):
             ax[1].imshow(o_out)
             ax[0].set_title('torch')
             ax[1].set_title('onnx')
-            fig.savefig(f'plot/{idx}.png')
+            fig.savefig(os.path.join(save_dir, f'{idx}.png'))
 
     print(error.max(), error.min(), np.abs(error).sum())
 

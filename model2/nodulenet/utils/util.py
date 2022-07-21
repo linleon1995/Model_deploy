@@ -172,9 +172,17 @@ def py_nms(dets, thresh):
         yy1 = torch.min(torch.cat((y[i:i+1] + h[i:i+1] / 2., y[order[1:]] + h[order[1:]] / 2.)))
         zz1 = torch.min(torch.cat((z[i:i+1] + d[i:i+1] / 2., z[order[1:]] + d[order[1:]] / 2.)))
 
-        inter_w = torch.max(torch.FloatTensor((0.0, xx1 - xx0)))
-        inter_h = torch.max(torch.FloatTensor((0.0, yy1 - yy0)))
-        inter_d = torch.max(torch.FloatTensor((0.0, zz1 - zz0)))
+        # inter_w = torch.max(torch.FloatTensor((torch.zeros(1), xx1 - xx0)))
+        # inter_h = torch.max(torch.FloatTensor((torch.zeros(1), yy1 - yy0)))
+        # inter_d = torch.max(torch.FloatTensor((torch.zeros(1), zz1 - zz0)))
+
+        inter_w = xx1 - xx0
+        inter_h = yy1 - yy0
+        inter_d = zz1 - zz0
+        inter_w = torch.max(torch.cat((torch.zeros(1).cuda(), inter_w.unsqueeze(0))))
+        inter_h = torch.max(torch.cat((torch.zeros(1).cuda(), inter_h.unsqueeze(0))))
+        inter_d = torch.max(torch.cat((torch.zeros(1).cuda(), inter_d.unsqueeze(0))))
+
         intersect = inter_w * inter_h * inter_d
         overlap = intersect / (areas[i] + areas[order[1:]] - intersect)
 
