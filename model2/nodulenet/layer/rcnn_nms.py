@@ -42,6 +42,7 @@ def rcnn_nms(cfg, mode, inputs, proposals, logits, deltas):
     # probs     = np_sigmoid(logits.cpu().data.numpy())
     probs = F.softmax(logits, dim=1)
     deltas = deltas.reshape(-1, num_class, 6)
+    proposals = proposals.cuda()
     # proposals = proposals
     # masks = (F.sigmoid(mask_logits).cpu().data.numpy() > 0.5).astype(np.uint8)
 
@@ -70,6 +71,7 @@ def rcnn_nms(cfg, mode, inputs, proposals, logits, deltas):
                     box = rcnn_decode(proposal[idx, 2:8], d, cfg['box_reg_weight'])
                     box = clip_boxes(box, inputs.shape[2:])
                     # box = clip_boxes(box, width, height)
+                    box = box.cuda()
 
                     # keep = filter_boxes(box, min_size = nms_min_size)
                     # num  = len(keep)
@@ -78,6 +80,7 @@ def rcnn_nms(cfg, mode, inputs, proposals, logits, deltas):
                         # p    = p[keep]
                     # js = np.expand_dims(np.array([j] * len(p)), axis=-1)
                     js = torch.IntTensor([j] * p.shape[0]).unsqueeze(-1)
+                    js = js.cuda()
                     output = torch.cat((p, box, js), 1).float()
 
                     if output.shape[0] > 0:

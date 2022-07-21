@@ -22,18 +22,41 @@ def mask_nms(cfg, mode, mask_logits, crop_boxes, inputs):
 
             visited[cur] = True
             keep_ids.append(cur)
-            mask1 = mask_logits2probs(mask_logits[cur])
+            mask1 = mask_logits[cur]
+            # mask1 = mask_logits2probs(mask_logits[cur])
             for i in range(cur + 1, n):
-                mask2 = mask_logits2probs(mask_logits[i])
+                # mask2 = mask_logits2probs(mask_logits[i])
+                mask2 = mask_logits[i]
                 if mask_iou(mask1, mask2) > nms_overlap_threshold:
                     visited[i] = True
             
             cur += 1
-
     return keep_ids
 
+
 def mask_iou(mask1, mask2):
-    return float(np.logical_and(mask1, mask2).sum()) / np.logical_or(mask1, mask2).sum()
+    z_compare = torch.reshape(torch.stack(torch.meshgrid([mask1[0], mask2[0]]), dim=0), (2, -1))
+    z_compare = torch.where(z_compare[0]==z_compare[1], 1, 0)
+    y_compare = torch.reshape(torch.stack(torch.meshgrid([mask1[1], mask2[1]]), dim=0), (2, -1))
+    y_compare = torch.where(y_compare[0]==y_compare[1], 1, 0)
+    x_compare = torch.reshape(torch.stack(torch.meshgrid([mask1[2], mask2[2]]), dim=0), (2, -1))
+    x_compare = torch.where(x_compare[0]==x_compare[1], 1, 0)
+    position_compare = torch.logical_and(
+        torch.logical_and(z_compare, y_compare), torch.logical_and(x_compare, y_compare))
+
+    num1 = mask1[0].shape[0]
+    num2 = mask2[0].shape[0]
+    intersection  = torch.sum(position_compare).float()
+    union = num1 + num2 - intersection
+    union = union.float()
+    iou = intersection / union
+    return iou
+
+
+# def mask_iou(mask1, mask2):
+#     iou = float(np.logical_and(mask1, mask2).sum()) / np.logical_or(mask1, mask2).sum()
+#     return iou
+
 
 def mask_logits2probs(mask):
     mask = (torch.sigmoid(mask) > 0.5).cpu().numpy().astype(np.uint8)

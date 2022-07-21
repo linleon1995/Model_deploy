@@ -92,12 +92,15 @@ def rpn_nms(cfg, mode, inputs, window, logits_flat, deltas_flat):
         proposal = [torch.empty((0, 8)).float()]
         # proposal = [torch.empty((0, 8),np.float32),]
 
-        ps = logits[b, : , 0].reshape(-1, 1)
-        ds = deltas[b, :, :]
+        # ps = logits[b, : , 0].reshape(-1, 1)
+        # ds = deltas[b, :, :]
+        ps = logits[b, : , 0].reshape(-1, 1).cuda()
+        ds = deltas[b, :, :].cuda()
+        window = window.cuda()
 
         # Only those anchor boxes larger than a pre-defined threshold
         # will be chosen for nms computation
-        index = np.where(ps[:, 0] > nms_pre_score_threshold)[0]
+        index = torch.where(ps[:, 0] > nms_pre_score_threshold)[0]
         if len(index) > 0:
             p = ps[index]
             d = ds[index]
@@ -105,6 +108,7 @@ def rpn_nms(cfg, mode, inputs, window, logits_flat, deltas_flat):
             box = rpn_decode(w, d, cfg['box_reg_weight'])
             box = clip_boxes(box, inputs.shape[2:])
 
+            box = box.cuda()
             output = torch.cat((p, box), 1)
             # output = np.concatenate((p, box),1)
 

@@ -51,8 +51,8 @@ def NoduleNet_to_ONNX():
     import SimpleITK as sitk
 
     print(time.ctime(time.time()))
-    dummy_input = torch.ones(1, 1, 64, 64, 64).cuda()
-    dummy_input2 = torch.randn(1, 1, 64, 64, 64, requires_grad=True).cuda()
+    # dummy_input = torch.ones(1, 1, 64, 64, 64).cuda()
+    # dummy_input2 = torch.randn(1, 1, 64, 64, 64, requires_grad=True).cuda()
 
     itkimage = sitk.ReadImage('17004765014077857895660775392470716_clean.nrrd')
     # itkimage = sitk.ReadImage('11029688907433245392075633136616444_clean.nrrd')
@@ -65,6 +65,7 @@ def NoduleNet_to_ONNX():
     dummy_input = (dummy_input.astype(np.float32) - 128.) / 128.
     print(dummy_input.min(), dummy_input.max())
     dummy_input = dummy_input[np.newaxis, np.newaxis]
+    print(dummy_input.shape)
     # dummy_input = np.tile(dummy_input, (2, 1, 1, 1, 1))
     # dummy_input = torch.from_numpy(dummy_input).cuda()
     # dummy_input = torch.from_numpy(dummy_input)
@@ -231,6 +232,17 @@ def main():
     # nodule_det_main()
     # nodule_cls_main()
     NoduleNet_to_ONNX()
+
+    # a = torch.zeros((1, 64, 32, 12))
+    # b = torch.LongTensor((12, 13, 17))
+    # c = torch.LongTensor((12, 13, 14))
+    # d = torch.LongTensor((1, 3, 4))
+    # e = torch.arange(a.shape[0])
+    # print(a.max(), a.sum())
+    # a[(e, b, c, d)] = 1
+    # print(a.max(), a.sum())
+    # d = d[:, :, :, c]
+    # print(d)
 
 
 if __name__ == '__main__':

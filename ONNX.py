@@ -13,34 +13,38 @@ def torch_to_ONNX_3d(dummy_input, model, save_filename):
     model.eval()
 
     # Input to the model
-    dummy_input = torch.from_numpy(dummy_input)
-    torch_out = model(dummy_input)
+    def to_numpy(tensor):
+        return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
+    dummy_input_t = torch.from_numpy(dummy_input)
+    model = model.cuda()
+    dummy_input_t = dummy_input_t.cuda()
+    with torch.no_grad():
+        torch_out_t = model(dummy_input_t)
+        torch_out = to_numpy(torch_out_t)
 
-    # # Export the model
-    # torch.onnx.export(model,               # model being run
-    #                 dummy_input,                         # model input (or a tuple for multiple inputs)
-    #                 save_filename,   # where to save the model (can be a file or file-like object)
-    #                 export_params=True,        # store the trained parameter weights inside the model file
-    #                 opset_version=13,          # the ONNX version to export the model to
-    #                 do_constant_folding=True,  # whether to execute constant folding for optimization
-    #                 input_names = ['input'],   # the model's input names
-    #                 output_names = ['output'], # the model's output names
-    #                 dynamic_axes={'input' : {1: 'channel', 2 : 'depth', 3: 'height', 4: 'width'},    # variable length axes
-    #                               'output' : {1: 'num_class', 2: 'depth', 3: 'height', 4: 'width'}})
+    # Export the model
+    torch.onnx.export(model,               # model being run
+                    dummy_input_t,                         # model input (or a tuple for multiple inputs)
+                    save_filename,   # where to save the model (can be a file or file-like object)
+                    export_params=True,        # store the trained parameter weights inside the model file
+                    opset_version=13,          # the ONNX version to export the model to
+                    do_constant_folding=True,  # whether to execute constant folding for optimization
+                    input_names = ['input'],   # the model's input names
+                    output_names = ['output'], # the model's output names
+                    dynamic_axes={'input' : {1: 'channel', 2 : 'depth', 3: 'height', 4: 'width'},    # variable length axes
+                                  'output' : {1: 'num_class', 2: 'depth', 3: 'height', 4: 'width'}})
 
 
     # onnx_model = onnx.load(save_filename)
     # onnx.checker.check_model(onnx_model)
     onnx_model = save_filename
 
-    def to_numpy(tensor):
-        return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
-    ort_outs = ONNX_inference(to_numpy(dummy_input), onnx_model)
+    ort_outs = ONNX_inference(dummy_input, onnx_model)
 
     # compare ONNX Runtime and PyTorch results
-    error = to_numpy(torch_out) - ort_outs[0]
+    error = torch_out - ort_outs[0]
     
-    for idx, (t_out, o_out) in enumerate(zip(to_numpy(torch_out)[0, 0], ort_outs[0][0, 0])):
+    for idx, (t_out, o_out) in enumerate(zip(torch_out[0, 0], ort_outs[0][0, 0])):
         if np.sum(t_out) or np.sum(o_out):
             print(idx)
             fig, ax = plt.subplots(1, 2)
@@ -52,7 +56,7 @@ def torch_to_ONNX_3d(dummy_input, model, save_filename):
 
     print(error.max(), error.min(), np.abs(error).sum())
 
-    np.testing.assert_allclose(to_numpy(torch_out), ort_outs[0], rtol=1e-03, atol=1e-5)
+    np.testing.assert_allclose(torch_out, ort_outs[0], rtol=1e-03, atol=1e-5)
     print("Exported model has been tested with ONNXRuntime, and the result looks good!")
 
 
