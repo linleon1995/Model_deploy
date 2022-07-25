@@ -220,6 +220,25 @@ def py_box_overlap(boxes1, boxes2):
     return overlap
     
     
+# def center_box_to_coord_box(bboxes):
+#     """
+#     Convert bounding box using center of rectangle and side lengths representation to 
+#     bounding box using coordinate representation
+#     [center_z, center_y, center_x, D, H, W] -> [z_start, y_start, x_start, z_end, y_end, x_end]
+
+#     bboxes: list of bounding boxes, [num_bbox, 6]
+#     """
+#     z_start = bboxes[:, 0] - bboxes[:, 3] / 2.
+#     y_start = bboxes[:, 1] - bboxes[:, 4] / 2.
+#     x_start = bboxes[:, 2] - bboxes[:, 5] / 2.
+#     z_end = bboxes[:, 0] + bboxes[:, 3] / 2.
+#     y_end = bboxes[:, 1] + bboxes[:, 4] / 2.
+#     x_end = bboxes[:, 2] + bboxes[:, 5] / 2.
+#     res = torch.stack((z_start, y_start, x_start, z_end, y_end, x_end), dim=1)
+#     return res
+
+
+
 def center_box_to_coord_box(bboxes):
     """
     Convert bounding box using center of rectangle and side lengths representation to 
@@ -258,6 +277,7 @@ def coord_box_to_center_box(bboxes):
 
     return res
 
+
 def ext2factor(bboxes, factor=8):
     """
     Given center box representation which is [z_start, y_start, x_start, z_end, y_end, x_end],
@@ -265,8 +285,8 @@ def ext2factor(bboxes, factor=8):
     """
     bboxes[:, :3] = bboxes[:, :3] // factor * factor
     bboxes[:, 3:] = bboxes[:, 3:] // factor * factor + (bboxes[:, 3:] % factor != 0).astype(np.int32) * factor
-
     return bboxes
+
 
 def clip_boxes(boxes, img_size):
     '''
@@ -279,7 +299,7 @@ def clip_boxes(boxes, img_size):
     boxes[:, 3] = np.clip(boxes[:, 3], boxes[:, 0]+4, depth)
     boxes[:, 4] = np.clip(boxes[:, 4], boxes[:, 1]+4, height)
     boxes[:, 5] = np.clip(boxes[:, 5], boxes[:, 2]+4, width)
-    # TODO: Leon
+    # TODO: Leon, to avoid 0:0 at first but in a bad representation. change it later.
     # boxes[:, 3] = np.clip(boxes[:, 3], 0, depth)
     # boxes[:, 4] = np.clip(boxes[:, 4], 0, height)
     # boxes[:, 5] = np.clip(boxes[:, 5], 0, width)

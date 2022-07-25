@@ -39,10 +39,13 @@ def mask_iou(mask1, mask2):
     z_compare = torch.where(z_compare[0]==z_compare[1], 1, 0)
     y_compare = torch.reshape(torch.stack(torch.meshgrid([mask1[1], mask2[1]]), dim=0), (2, -1))
     y_compare = torch.where(y_compare[0]==y_compare[1], 1, 0)
-    x_compare = torch.reshape(torch.stack(torch.meshgrid([mask1[2], mask2[2]]), dim=0), (2, -1))
-    x_compare = torch.where(x_compare[0]==x_compare[1], 1, 0)
+    comp1 = torch.logical_and(z_compare, y_compare)
+
+    # TODO: below z_compare should be x_compare, change it temporally because CUDA out of memory Error
+    z_compare = torch.reshape(torch.stack(torch.meshgrid([mask1[2], mask2[2]]), dim=0), (2, -1))
+    z_compare = torch.where(z_compare[0]==z_compare[1], 1, 0)
     position_compare = torch.logical_and(
-        torch.logical_and(z_compare, y_compare), torch.logical_and(x_compare, y_compare))
+        comp1, torch.logical_and(z_compare, y_compare))
 
     num1 = mask1[0].shape[0]
     num2 = mask2[0].shape[0]

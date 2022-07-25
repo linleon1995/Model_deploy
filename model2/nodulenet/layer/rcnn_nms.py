@@ -54,48 +54,51 @@ def rcnn_nms(cfg, mode, inputs, proposals, logits, deltas):
         detection = [torch.empty((0, 9)).float()]
 
         index = torch.where(proposals[:,0] == b)[0]
-        if len(index)>0:
-            prob  = probs[index]
-            delta = deltas[index]
-            proposal = proposals[index]
-            # mask = masks[index]
-            # cats = np.argmax(prob, 1)
+        # if len(index)>0:
+        prob  = probs[index]
+        delta = deltas[index]
+        proposal = proposals[index]
+        # mask = masks[index]
+        # cats = np.argmax(prob, 1)
 
-            for j in range(1, num_class): #skip background
-                idx = torch.where(prob[:, j] > nms_pre_score_threshold)[0]
-                # idx = np.where(cats == j)[0]
-                if idx.shape[0] > 0:
-                    p = prob[idx, j].reshape(-1, 1)
-                    d = delta[idx, j]
-                    # m = mask[idx, j - 1]
-                    box = rcnn_decode(proposal[idx, 2:8], d, cfg['box_reg_weight'])
-                    box = clip_boxes(box, inputs.shape[2:])
-                    # box = clip_boxes(box, width, height)
-                    box = box.cuda()
+        for j in range(1, num_class): #skip background
+            idx = torch.where(prob[:, j] > nms_pre_score_threshold)[0]
+            # idx = np.where(cats == j)[0]
+            # if idx.shape[0] > 0:
+            p = prob[idx, j].reshape(-1, 1)
+            d = delta[idx, j]
+            # m = mask[idx, j - 1]
+            box = rcnn_decode(proposal[idx, 2:8], d, cfg['box_reg_weight'])
+            box = clip_boxes(box, inputs.shape[2:])
+            # box = clip_boxes(box, width, height)
+            box = box.cuda()
 
-                    # keep = filter_boxes(box, min_size = nms_min_size)
-                    # num  = len(keep)
-                    # if num>0:
-                        # box  = box[keep]
-                        # p    = p[keep]
-                    # js = np.expand_dims(np.array([j] * len(p)), axis=-1)
-                    js = torch.IntTensor([j] * p.shape[0]).unsqueeze(-1)
-                    js = js.cuda()
-                    output = torch.cat((p, box, js), 1).float()
+            # keep = filter_boxes(box, min_size = nms_min_size)
+            # num  = len(keep)
+            # if num>0:
+                # box  = box[keep]
+                # p    = p[keep]
+            # js = np.expand_dims(np.array([j] * len(p)), axis=-1)
+            js = torch.IntTensor([j] * p.shape[0]).unsqueeze(-1)
+            js = js.cuda()
+            output = torch.cat((p, box, js), 1).float()
 
-                    if output.shape[0] > 0:
-                        # output = torch.from_numpy(output).float()
-                        output, keep = torch_nms(output, nms_overlap_threshold)
+            # if output.shape[0] > 0:
+            # output = torch.from_numpy(output).float()
+            
+            # TODO: torch_nms casue two ONNX TracerWarning, command this temporally.
+            # 1. while order.shape[0] > 0: 2. return dets[keep], torch.LongTensor(keep)
+            # output, keep = torch_nms(output, nms_overlap_threshold)
 
-                    num = output.shape[0]
+            num = output.shape[0]
 
-                    if num > 0:
-                        det = torch.zeros((num, 9)).float()
-                        det[:, 0] = b
-                        det[:, 1:] = output
-                        detection.append(det)
-                        # segments.append(m[keep.numpy()])
-                        keeps.extend(index[idx[keep.numpy()]].tolist())
+            # if num > 0:
+            det = torch.zeros((num, 9)).float()
+            det[:, 0] = b
+            det[:, 1:] = output
+            detection.append(det)
+            # segments.append(m[keep.numpy()])
+            # keeps.extend(index[idx[keep.numpy()]].tolist())
 
         detection = torch.vstack(detection)
 
@@ -104,6 +107,8 @@ def rcnn_nms(cfg, mode, inputs, proposals, logits, deltas):
     detections = Variable(torch.vstack(detections))
     # detections = Variable(torch.from_numpy(np.vstack(detections))).cuda()
     # segments = np.vstack(segments)
+    # TODO: keeps is not using, remove it in the future
+    keeps = None
     return detections, keeps
 
 

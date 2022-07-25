@@ -54,8 +54,8 @@ def NoduleNet_to_ONNX():
     # dummy_input = torch.ones(1, 1, 64, 64, 64).cuda()
     # dummy_input2 = torch.randn(1, 1, 64, 64, 64, requires_grad=True).cuda()
 
-    itkimage = sitk.ReadImage('17004765014077857895660775392470716_clean.nrrd')
-    # itkimage = sitk.ReadImage('11029688907433245392075633136616444_clean.nrrd')
+    # itkimage = sitk.ReadImage('17004765014077857895660775392470716_clean.nrrd')
+    itkimage = sitk.ReadImage('11029688907433245392075633136616444_clean.nrrd')
     dummy_input = sitk.GetArrayFromImage(itkimage)
     # dummy_input = dummy_input[:128, :128, :128]
     dummy_input, pad = pad2factor(dummy_input)
@@ -228,10 +228,52 @@ def nodule_det_main():
     print(f'Error {np.mean(total_error)} in {len(total_error)} cases')
 
 
+def NoduleNet_to_ONNX_split():
+    from model2.nodulenet.nodule_net import NoduleNet
+    from model2.nodulenet.config import config
+    import time
+    import SimpleITK as sitk
+
+    print(time.ctime(time.time()))
+    itkimage = sitk.ReadImage('11029688907433245392075633136616444_clean.nrrd')
+    dummy_input = sitk.GetArrayFromImage(itkimage)
+    dummy_input, pad = pad2factor(dummy_input)
+
+    dummy_input = (dummy_input.astype(np.float32) - 128.) / 128.
+    dummy_input = dummy_input[np.newaxis, np.newaxis]
+    print(dummy_input.min(), dummy_input.max())
+    print(dummy_input.shape)
+    # print(time.ctime(time.time()))
+    
+    nodulenet_model = NoduleNet(config)
+    nodulenet_model = prepare_model(nodulenet_model, config, use_cuda=False)
+
+    feature_net = nodulenet_model.feature_net
+    rpn_head = nodulenet_model.rpn
+    rcnn_head = nodulenet_model.rcnn_head
+    mask_head = nodulenet_model.mask_head
+
+    rpn_input = np.ones([1, 128, 92, 64, 112], dtype=np.float32)
+    rcnn_input = np.ones([260, 64, 7, 7, 7], dtype=np.float32)
+    mask_input = [
+        np.ones([1, 128, 5, 4, 4], dtype=np.float32),
+        np.ones([1, 32, 10, 8, 8], dtype=np.float32),
+        np.ones([1, 1, 20, 16, 16], dtype=np.float32),
+        1.0,
+    ]
+                  
+    with torch.no_grad():
+        # feature_net = torch_to_ONNX_3d(dummy_input, feature_net, "feature_net.onnx")
+        # rpn_head = torch_to_ONNX_3d(rpn_input, rpn_head, "rpn_head.onnx")
+        # rcnn_head = torch_to_ONNX_3d(rcnn_input, rcnn_head, "rcnn_head.onnx")
+        mask_head = torch_to_ONNX_3d(mask_input, mask_head, "mask_head.onnx")
+
+
 def main():
     # nodule_det_main()
     # nodule_cls_main()
-    NoduleNet_to_ONNX()
+    # NoduleNet_to_ONNX()
+    NoduleNet_to_ONNX_split()
 
     # a = torch.zeros((1, 64, 32, 12))
     # b = torch.LongTensor((12, 13, 17))

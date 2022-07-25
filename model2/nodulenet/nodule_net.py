@@ -127,6 +127,7 @@ class FeatureNet(nn.Module):
         rev2 = self.path2(comb3)
         comb2 = self.back2(torch.cat((rev2, out2), 1))#64+64
 
+        # return x, out1, comb2, out2
         return [x, out1, comb2], out2
 
 class RpnHead(nn.Module):
@@ -217,6 +218,20 @@ class MaskHead(nn.Module):
         for i in range(self.num_class):
             setattr(self, 'logits' + str(i + 1), nn.Conv3d(64, 1, kernel_size=1))
 
+    def forward2(self, crop_f4, crop_f2, im, cat):
+        crop_f2.unsqueeze(0)
+        up2 = self.up2(crop_f4)
+        up2 = self.back2(torch.cat((up2, crop_f2.unsqueeze(0)), 1))
+        up3 = self.up3(up2)
+        up3 = self.back3(torch.cat((up3, im), 1))
+
+        logits = getattr(self, 'logits' + str(int(cat)))(up3)
+        logits = logits.squeeze()
+        out_mask = torch.sigmoid(logits)>0.5
+        out_mask = out_mask.int()
+        return out_mask
+
+
     def forward(self, detections, features):
         img, f_2, f_4 = features  
 
@@ -232,11 +247,7 @@ class MaskHead(nn.Module):
 
         for idx, detection in enumerate(detections):
             b, z_start, y_start, x_start, z_end, y_end, x_end, cat = detection
-            # print('dddd', detection)
-            # x = z_start//4
-            # print(x.dtype)
-            # print('kkk', z_start, z_end, y_start, y_end, x_start, x_end)
-            # print('eeee', z_start//4, z_end//4, y_start//4, y_end//4, x_start//4, x_end//4)
+
             up1 = f_4[
                 b,
                 :, 
@@ -479,7 +490,74 @@ class NoduleNet(nn.Module):
                 
                 self.mask_probs = crop_mask_regions(self.mask_probs, self.crop_boxes)
 
+    def inference(self, inputs):
+        # Image feature
+        features, feat_4 = self.feature_net(inputs); #print('fs[-1] ', fs[-1].shape)
+        fs = features[-1]
+
+        # RPN proposals
+        self.rpn_logits_flat, self.rpn_deltas_flat = self.rpn(fs)
+
+        b,D,H,W,_,num_class = self.rpn_logits_flat.shape
+
+        self.rpn_logits_flat = self.rpn_logits_flat.view(b, -1, 1);#print('rpn_logit ', self.rpn_logits_flat.shape)
+        self.rpn_deltas_flat = self.rpn_deltas_flat.view(b, -1, 6);#print('rpn_delta ', self.rpn_deltas_flat.shape)
+
+        self.rpn_window  = make_rpn_windows(fs, self.cfg)
+        self.rpn_proposals = []
+        if self.use_rcnn:
+            self.rpn_proposals = rpn_nms(self.cfg, self.mode, inputs, self.rpn_window,
+                  self.rpn_logits_flat, self.rpn_deltas_flat)
+            # print 'length of rpn proposals', self.rpn_proposals.shape
+
+        # RCNN proposals
+        self.detections = copy.deepcopy(self.rpn_proposals)
+        self.mask_probs, self.mask_targets = [], []
+        self.crop_boxes = []
+        if self.use_rcnn:
+            if len(self.rpn_proposals) > 0:
+                rcnn_crops = self.rcnn_crop(feat_4, inputs, self.rpn_proposals)
+                self.rcnn_logits, self.rcnn_deltas = self.rcnn_head(rcnn_crops)
+                self.detections, self.keeps = rcnn_nms(
+                    self.cfg, self.mode, inputs, self.rpn_proposals, 
+                    self.rcnn_logits, self.rcnn_deltas
+                ) 
+
+            # pred_mask = np.zeros(list(inputs.shape[2:]))
+            if self.use_mask and len(self.detections):
+                # keep batch index, z, y, x, d, h, w, class
+                if len(self.detections):
+                    self.crop_boxes = self.detections[:, [0, 2, 3, 4, 5, 6, 7, 8]].cpu().numpy().copy()
+                    self.crop_boxes[:, 1:-1] = center_box_to_coord_box(self.crop_boxes[:, 1:-1])
+                    self.crop_boxes = self.crop_boxes.astype(np.int32)
+                    # self.crop_boxes[:, 4:-1] = self.crop_boxes[:, 4:-1] + np.ones_like(self.crop_boxes[:, 4:-1])
+                    self.crop_boxes[:, 1:-1] = ext2factor(self.crop_boxes[:, 1:-1], 4)
+                    self.crop_boxes[:, 1:-1] = clip_boxes(self.crop_boxes[:, 1:-1], inputs.shape[2:])
+                
+                # Make sure to keep feature maps not splitted by data parallel
+                features = [t.unsqueeze(0).expand(torch.cuda.device_count(), -1, -1, -1, -1, -1) for t in features]
+                self.mask_probs = self.mask_head(torch.from_numpy(self.crop_boxes).cuda(), features)
+
+                mask_keep = mask_nms(self.cfg, self.mode, self.mask_probs, self.crop_boxes, inputs)
+                self.crop_boxes = self.crop_boxes[mask_keep]
+                self.detections = self.detections[mask_keep]
+                # self.mask_probs = self.mask_probs[mask_keep]
+                out_masks = []
+                for keep_idx in mask_keep:
+                    out_masks.append(self.mask_probs[keep_idx])
+                self.mask_probs = out_masks
+                
+                pred_mask = crop_mask_regions(self.mask_probs, self.crop_boxes, features[0][0].shape)
+
+                # # segments = [torch.sigmoid(m).cpu().numpy() > 0.5 for m in self.mask_probs]
+                # segments = [torch.sigmoid(m) > 0.5 for m in self.mask_probs]
+                # pred_mask = crop_boxes2mask_single(self.crop_boxes[:, 1:], segments, inputs.shape[2:])
+        # TODO: correctly get the num_class and batch size dimension
+        # pred_mask = pred_mask[None, None]
+        return pred_mask
+
     def forward(self, inputs):
+        """This version try to eliminate TraceWarning in ONNX"""
         # Image feature
         features, feat_4 = self.feature_net(inputs); #print('fs[-1] ', fs[-1].shape)
         fs = features[-1]
@@ -504,16 +582,19 @@ class NoduleNet(nn.Module):
         self.mask_probs, self.mask_targets = [], []
         self.crop_boxes = []
         if self.use_rcnn:
-            if len(self.rpn_proposals) > 0:
-                rcnn_crops = self.rcnn_crop(feat_4, inputs, self.rpn_proposals)
-                self.rcnn_logits, self.rcnn_deltas = self.rcnn_head(rcnn_crops)
-                self.detections, self.keeps = rcnn_nms(
-                    self.cfg, self.mode, inputs, self.rpn_proposals, 
-                    self.rcnn_logits, self.rcnn_deltas
-                ) 
+            # TODO: pass even no rpn_proposals
+            # if len(self.rpn_proposals) > 0:
+            rcnn_crops = self.rcnn_crop(feat_4, inputs, self.rpn_proposals)
+            self.rcnn_logits, self.rcnn_deltas = self.rcnn_head(rcnn_crops)
+            self.detections, self.keeps = rcnn_nms(
+                self.cfg, self.mode, inputs, self.rpn_proposals, 
+                self.rcnn_logits, self.rcnn_deltas
+            )
 
             # pred_mask = np.zeros(list(inputs.shape[2:]))
-            if self.use_mask and len(self.detections):
+            # if self.use_mask and len(self.detections):
+            # TODO: pass even no proposal in self.detections
+            if self.use_mask:
                 # keep batch index, z, y, x, d, h, w, class
                 if len(self.detections):
                     self.crop_boxes = self.detections[:, [0, 2, 3, 4, 5, 6, 7, 8]].cpu().numpy().copy()
