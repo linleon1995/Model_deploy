@@ -218,21 +218,23 @@ class MaskHead(nn.Module):
         for i in range(self.num_class):
             setattr(self, 'logits' + str(i + 1), nn.Conv3d(64, 1, kernel_size=1))
 
-    def forward2(self, crop_f4, crop_f2, im, cat):
-        crop_f2.unsqueeze(0)
+    def forward(self, crop_f4, crop_f2, im):
+        # crop_f2.unsqueeze(0)
         up2 = self.up2(crop_f4)
-        up2 = self.back2(torch.cat((up2, crop_f2.unsqueeze(0)), 1))
+        up2 = self.back2(torch.cat((up2, crop_f2), 1))
         up3 = self.up3(up2)
         up3 = self.back3(torch.cat((up3, im), 1))
 
-        logits = getattr(self, 'logits' + str(int(cat)))(up3)
+        logits = getattr(self, 'logits1')(up3)
         logits = logits.squeeze()
         out_mask = torch.sigmoid(logits)>0.5
         out_mask = out_mask.int()
+        out_mask = out_mask.unsqueeze(0)
+        out_mask = out_mask.unsqueeze(0)
         return out_mask
 
 
-    def forward(self, detections, features):
+    def forward_ori(self, detections, features):
         img, f_2, f_4 = features  
 
         # Squeeze the first dimension to recover from protection on avoiding split by dataparallel      
@@ -297,6 +299,7 @@ def crop_mask_regions(masks, crop_boxes, out_shape):
     out_mask = torch.zeros(out_shape)
     for i in range(len(crop_boxes)):
         post_indices = torch.stack(masks[i], dim=0)
+        b, z_start, y_start, x_start, z_end, y_end, x_end, cat = crop_boxes[i]
         out_mask[(
             torch.arange(out_mask.shape[0]), torch.arange(out_mask.shape[1]), 
             post_indices[0], post_indices[1], post_indices[2]

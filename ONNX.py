@@ -23,7 +23,7 @@ def torch_to_ONNX_3d(dummy_input, model, save_filename):
         dummy_input_t = []
         for np_input in dummy_input:
             if isinstance(np_input, (float, int)):
-                inputs = torch.Tensor(np_input)
+                inputs = torch.tensor(np_input)
             else:
                 inputs = torch.from_numpy(np_input)
             inputs = inputs.cuda()
@@ -47,16 +47,25 @@ def torch_to_ONNX_3d(dummy_input, model, save_filename):
             torch_out = to_numpy(torch_out_t)
 
     # Export the model
+    # dynamic_axes = {'input_1': [0, 2, 3], 'output_1': {0: 'output_1_variable_dim_0', 1: 'output_1_variable_dim_1'}}
+    # model_proto_name = 'conv2d.onnx'
+    # torch.onnx.export(model, x, model_proto_name, verbose=True, input_names=["input_1"], output_names=["output_1"],
+    #                     example_outputs=y, dynamic_axes=dynamic_axes)
     torch.onnx.export(model,               # model being run
-                      dummy_input_t,                         # model input (or a tuple for multiple inputs)
+                      tuple(dummy_input_t),                         # model input (or a tuple for multiple inputs)
                       save_filename,   # where to save the model (can be a file or file-like object)
                       export_params=True,        # store the trained parameter weights inside the model file
                       opset_version=13,          # the ONNX version to export the model to
                       do_constant_folding=True,  # whether to execute constant folding for optimization
-                      input_names = ['input'],   # the model's input names
+                      input_names = ['crop_f4', 'crop_f2', 'input'],   # the model's input names
                       output_names = ['output'], # the model's output names
-                      dynamic_axes={'input' : {1: 'channel', 2 : 'depth', 3: 'height', 4: 'width'},    # variable length axes
-                                  'output' : {1: 'num_class', 2: 'depth', 3: 'height', 4: 'width'}}
+                      dynamic_axes={
+                                    'input': {1: 'channel', 2 : 'depth', 3: 'height', 4: 'width'},
+                                    'crop_f2': {1: 'channel', 2 : 'depth', 3: 'height', 4: 'width'},
+                                    'crop_f4': {1: 'channel', 2 : 'depth', 3: 'height', 4: 'width'},
+                                    # 'cat': {0: 'batch_size'},
+                                    'output': {2: 'depth', 3: 'height', 4: 'width'}}
+                                    # 'output': {1: 'num_class', 2: 'depth', 3: 'height', 4: 'width'}}
                       )
 
 
@@ -67,7 +76,7 @@ def torch_to_ONNX_3d(dummy_input, model, save_filename):
     ort_outs = ONNX_inference(dummy_input, onnx_model)
 
     # compare ONNX Runtime and PyTorch results
-    for t, o in zip(torch_out, ort_outs):
+    for t, o in zip(torch_out[0,0], ort_outs[0][0,0]):
         error = t - o
         
         # np.random.seed(None)
@@ -93,7 +102,15 @@ def torch_to_ONNX_3d(dummy_input, model, save_filename):
 def ONNX_inference(inputs, onnx_model):
     ort_session = onnxruntime.InferenceSession(onnx_model)
     # compute ONNX Runtime output prediction
-    ort_inputs = {ort_session.get_inputs()[0].name: inputs}
+    input_names = ort_session.get_inputs()
+    ort_inputs = {
+        ort_session.get_inputs()[0].name: inputs[0],
+        ort_session.get_inputs()[1].name: inputs[1],
+        ort_session.get_inputs()[2].name: inputs[2],
+        # 'cat': inputs[3],
+        # ort_session.get_inputs()[3].name: inputs[3],
+    }
+    # ort_inputs = {ort_session.get_inputs()[0].name: inputs}
     ort_outs = ort_session.run(None, ort_inputs)
     return ort_outs
 

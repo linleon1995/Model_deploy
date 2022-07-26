@@ -255,12 +255,13 @@ def NoduleNet_to_ONNX_split():
 
     rpn_input = np.ones([1, 128, 92, 64, 112], dtype=np.float32)
     rcnn_input = np.ones([260, 64, 7, 7, 7], dtype=np.float32)
-    mask_input = [
+    mask_input = (
         np.ones([1, 128, 5, 4, 4], dtype=np.float32),
         np.ones([1, 32, 10, 8, 8], dtype=np.float32),
         np.ones([1, 1, 20, 16, 16], dtype=np.float32),
-        1.0,
-    ]
+        # np.ones([1, 1, 20, 16, 16], dtype=np.float32),
+        # np.ones(1, dtype=np.float32)[None],
+    )
                   
     with torch.no_grad():
         # feature_net = torch_to_ONNX_3d(dummy_input, feature_net, "feature_net.onnx")
