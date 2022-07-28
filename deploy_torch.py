@@ -33,14 +33,13 @@ def ONNX_inference3():
 
 def prepare_model(net, config, use_cuda=True):
     if use_cuda:
-        net = net.cuda()
+        net.cuda()
     initial_checkpoint = config['initial_checkpoint']
     checkpoint = torch.load(initial_checkpoint)
     net.load_state_dict(checkpoint['state_dict'], strict=False)
     net.set_mode('eval')
     net.use_mask = True
     net.use_rcnn = True
-    return net
 
 
 def NoduleNet_to_ONNX():
@@ -73,7 +72,7 @@ def NoduleNet_to_ONNX():
     print(time.ctime(time.time()))
     
     torch_model = NoduleNet(config)
-    torch_model = prepare_model(torch_model, config, use_cuda=False)
+    prepare_model(torch_model, config, use_cuda=False)
     
     with torch.no_grad():
         onnx_model = torch_to_ONNX_3d(dummy_input, torch_model, "nodulenet_v2.onnx")
@@ -175,7 +174,7 @@ def nodule_det_main():
     from model2.nodulenet.nodule_net import NoduleNet
     from model2.nodulenet.config import config
     torch_model = NoduleNet(config)
-    torch_model = prepare_model(torch_model, config, use_cuda=False)
+    prepare_model(torch_model, config, use_cuda=False)
 
     onnx_total_time = []
     torch_total_time = []
@@ -246,7 +245,7 @@ def NoduleNet_to_ONNX_split():
     # print(time.ctime(time.time()))
     
     nodulenet_model = NoduleNet(config)
-    nodulenet_model = prepare_model(nodulenet_model, config, use_cuda=False)
+    prepare_model(nodulenet_model, config, use_cuda=False)
 
     feature_net = nodulenet_model.feature_net
     rpn_head = nodulenet_model.rpn
