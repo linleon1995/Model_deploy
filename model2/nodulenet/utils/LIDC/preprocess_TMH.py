@@ -12,7 +12,7 @@ import time
 import cc3d
 
 from utils import timer_func
-
+from Liwei_lung_segmentation import lung_segmentation
 
 
 @timer_func
@@ -23,16 +23,17 @@ def torch_inference(nodulenet, input_image):
 
 
 def load_itk_image(filename):
-    """Return img array and [z,y,x]-ordered origin and spacing
-    """
-
+    '''
+    This funciton reads a '.mhd' file using SimpleITK and return the image array, origin and spacing of the image.
+    '''
+    # Reads the image using SimpleITK
     itkimage = sitk.ReadImage(filename)
-    numpyImage = sitk.GetArrayFromImage(itkimage)
+    ct_scan = sitk.GetArrayFromImage(itkimage)
+    origin = np.array(list(reversed(itkimage.GetOrigin())))
+    spacing = np.array(list(reversed(itkimage.GetSpacing())))
+    direction = np.array(list(reversed(itkimage.GetDirection()))).reshape(3, 3)
+    return ct_scan, origin, spacing, direction
 
-    numpyOrigin = np.array(list(reversed(itkimage.GetOrigin())))
-    numpySpacing = np.array(list(reversed(itkimage.GetSpacing())))
-
-    return numpyImage, numpyOrigin, numpySpacing
 
 def binarize(image, spacing, intensity_thred=-600, sigma=1.0, area_thred=30.0,
              eccen_thred=0.99, corner_side=10):
@@ -531,7 +532,7 @@ def resample(image, spacing, new_spacing=[1.0, 1.0, 1.0], order=1):
     return (image_new, resample_spacing)
 
 
-def resample2(image, spacing, new_spacing=[1.0, 1.0, 1.0], order=1, mode='trilinear'):
+def resample2(image, spacing, new_spacing=[1.0, 1.0, 1.0], order=1, mode='trilinear', numpy_io=True):
     # TODO: channel problem
     new_shape = np.round(image.shape * spacing / new_spacing)
 
@@ -542,11 +543,15 @@ def resample2(image, spacing, new_spacing=[1.0, 1.0, 1.0], order=1, mode='trilin
     new_shape = tuple(np.int32(new_shape).tolist())
 
     image = image[None, None]
-    image = torch.Tensor(image)
-    zoomed = torch.nn.functional.interpolate(image, size=new_shape, mode=mode)
-    zoomed = zoomed.cpu().detach().numpy()
+    if numpy_io:
+        image = torch.Tensor(image)
 
-    return (zoomed[0, 0], resample_spacing)
+    image = torch.nn.functional.interpolate(image, size=new_shape, mode=mode)
+    
+    if numpy_io:
+        image = image.cpu().detach().numpy()
+
+    return (image[0, 0], resample_spacing)
 
 
 @timer_func
@@ -699,14 +704,15 @@ def preprocess_op_new(ct_img, spacing):
     # Extract lung mask
     @timer_func
     def get_lung_mask(img):
-        (binary_mask1, binary_mask2, has_lung), _ = extract_lung(img, spacing)
-        lung_mask_vol = np.where(binary_mask1+binary_mask2>0, 1, 0)
-        z_range, y_range, x_range = np.where(lung_mask_vol)
-        z_min, z_max = z_range.min(), z_range.max()
-        lung_mask_vol = scipy.ndimage.binary_dilation(
-            lung_mask_vol, structure=np.ones((7, 7, 7)), iterations=2)
-        lung_mask_vol[:z_min] = 0
-        lung_mask_vol[z_max:] = 0
+        lung_mask_vol = lung_segmentation(img)
+        # (binary_mask1, binary_mask2, has_lung), _ = extract_lung(img, spacing)
+        # lung_mask_vol = np.where(binary_mask1+binary_mask2>0, 1, 0)
+        # z_range, y_range, x_range = np.where(lung_mask_vol)
+        # z_min, z_max = z_range.min(), z_range.max()
+        # lung_mask_vol = scipy.ndimage.binary_dilation(
+        #     lung_mask_vol, structure=np.ones((7, 7, 7)), iterations=2)
+        # lung_mask_vol[:z_min] = 0
+        # lung_mask_vol[z_max:] = 0
         return lung_mask_vol
 
     lung_mask, t2 = get_lung_mask(ct_img)
@@ -719,7 +725,8 @@ def preprocess_op_new(ct_img, spacing):
     # seg_img = resample_lung_mask * resample_img
     
     # lung masking
-    lung_box, t6 = get_lung_box(lung_mask, resample_img.shape)
+    shape_before_lung_box = resample_img.shape
+    lung_box, t6 = get_lung_box(lung_mask, shape_before_lung_box)
     z_min, z_max = lung_box[0]
     y_min, y_max = lung_box[1]
     x_min, x_max = lung_box[2]
@@ -732,4 +739,4 @@ def preprocess_op_new(ct_img, spacing):
         'Resample': t3,
         'Lung_box': t6,
     }
-    return seg_img, lung_box, resample_img, preprocess_time
+    return seg_img, lung_box, resample_img, shape_before_lung_box, preprocess_time

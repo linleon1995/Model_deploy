@@ -24,9 +24,31 @@ def mask_nms(cfg, mode, mask_logits, crop_boxes, inputs):
 
             visited[cur] = True
             keep_ids.append(cur)
-            mask1 = mask_logits2probs(mask_logits[cur])
+            bbox = crop_boxes[cur]
+            cur_z_start, cur_y_start, cur_x_start, cur_z_end, cur_y_end, cur_x_end = bbox[1:-1]
+            # mask1 = mask_logits[cur][z_start:z_end, y_start:y_end, x_start:x_end]
+            mask1_vol = mask_logits2probs(mask_logits[cur])
+            # mask1 = mask_logits2probs(mask_logits[cur])
             for i in range(cur + 1, n):
-                mask2 = mask_logits2probs(mask_logits[i])
+                bbox = crop_boxes[i]
+                z_start, y_start, x_start, z_end, y_end, x_end = bbox[1:-1]
+                # TODO: boundary condition
+                z_start, y_start, x_start = np.min(
+                    np.array([
+                        [cur_z_start, cur_y_start, cur_x_start],
+                        [z_start, y_start, x_start]
+                    ]), axis=0
+                )
+                z_end, y_end, x_end = np.max(
+                    np.array([
+                        [cur_z_end, cur_y_end, cur_x_end],
+                        [z_end, y_end, x_end]
+                    ]), axis=0
+                )
+                mask2 = mask_logits[i][z_start:z_end, y_start:y_end, x_start:x_end]
+                mask2 = mask_logits2probs(mask2)
+                mask1 = mask1_vol[z_start:z_end, y_start:y_end, x_start:x_end]
+                # mask2 = mask_logits2probs(mask_logits[i])
                 if mask_iou(mask1, mask2) > nms_overlap_threshold:
                     visited[i] = True
             
