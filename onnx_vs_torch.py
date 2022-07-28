@@ -21,10 +21,12 @@ from nodule_to_nrrd import seg_nrrd_write
 
 @timer_func
 def model_inference(
-    cfg, inputs, feature_net_session, rpn_session, rcnn_session, mask_session, rcnn_crop, filename):
+    cfg, inputs, feature_net_session, rpn_session, rcnn_session, mask_session, nodule_cls_session, 
+    rcnn_crop, filename):
     mode = 'eval'
     use_rcnn = True
     use_mask = True
+    max_bboxs = 150
 
     # Image feature
     # features, feat_4 = feature_net(inputs); #print('fs[-1] ', fs[-1].shape)
@@ -75,9 +77,10 @@ def model_inference(
             rcnn_logits = torch.from_numpy(rcnn_logits)
             rcnn_deltas = torch.from_numpy(rcnn_deltas)
 
+
             detections, keeps = rcnn_nms(
                 cfg, mode, inputs, rpn_proposals, 
-                rcnn_logits, rcnn_deltas
+                rcnn_logits, rcnn_deltas, max_bboxs
             ) 
 
         pred_mask = np.zeros(list(inputs.shape[2:]))
@@ -124,6 +127,7 @@ def model_inference(
             
             # pred_mask = crop_mask_regions(mask_probs, crop_boxes, features[0].shape)
             mask_probs = crop_mask_regions(mask_probs, crop_boxes)
+            # segments = [torch.sigmoid(m) for m in mask_probs]
             segments = [torch.sigmoid(m) > 0.5 for m in mask_probs]
             pred_mask = crop_boxes2mask_single(crop_boxes[:, 1:], segments, inputs.shape[2:])
     
@@ -153,7 +157,15 @@ def error_check(onnx_pred, torch_pred):
 
 
 def unpad(inputs, pad):
-    return inputs[:-pad[0][1], :-pad[1][1], :-pad[2][1]]
+    unpad_slices = []
+    in_shape = inputs.shape
+    for dim, pad_in_dim in enumerate(pad):
+        if pad_in_dim[1] == 0:
+            unpad_slices.append(slice(pad_in_dim[0], in_shape[dim]))
+        else:
+            unpad_slices.append(slice(pad_in_dim[0], -pad_in_dim[1]))
+    inputs = inputs[tuple(unpad_slices)]
+    return inputs
 
 
 def recover_lung_box(post_pred, lung_box, input_shape):
@@ -167,8 +179,10 @@ def recover_lung_box(post_pred, lung_box, input_shape):
 
 
 def resample_back(infrence_result, old_spacing, new_spacing):
+    # TODO: better interpolation
     post_result, resample_spacing = resample2(
         infrence_result, old_spacing, new_spacing, mode='nearest')
+    # post_result = np.where(post_result>0.5, 1, 0)
     return post_result
 
 
@@ -180,7 +194,7 @@ def save_seg_nrrd(filename, ct_scan, direction, spacing, origin):
 
 
 def main():
-    total_time = {'onnx': [], 'torch': []}
+    total_time = {'onnx': [], 'torch': [], 'pre': [], 'post': []}
     f_list = glob.glob(rf'C:\Users\test\Desktop\Leon\Datasets\TMH_Nodule-preprocess\merge_old\**\*.mhd', recursive=True)
     f_list = [f for f in f_list if 'raw' in f]
     # f_list = glob.glob(rf'D:\Leon\Datasets\TMH-preprocess\preprocess_old\*_clean.nrrd')
@@ -194,13 +208,15 @@ def main():
     rpn_head_session = onnxruntime.InferenceSession("rpn_head.onnx")
     rcnn_head_session = onnxruntime.InferenceSession("rcnn_head.onnx")
     mask_head_session = onnxruntime.InferenceSession("mask_head.onnx")
+    nodule_cls_session = onnxruntime.InferenceSession("nodule_cls.onnx")
     rcnn_crop = nodulenet.rcnn_crop
 
     for idx, f in enumerate(f_list):
-        # if idx<3: continue
+        if idx>2: break
         input_image, origin, spacing, direction = load_itk_image(f)
 
-        _, lung_box, preprocess_input, shape_before_lung_box, preprocess_time = preprocess_op_new(input_image, spacing)
+        preprocess_result = preprocess_op_new(input_image, spacing)
+        _, lung_box, preprocess_input, shape_before_lung_box, preprocess_time = preprocess_result
         # preprocess_input, _, _ = preprocess_op(input_image, spacing, lung_f)
         p_time = sum(list(preprocess_time.values()))
         preprocess_input, pad = pad2factor(preprocess_input)
@@ -210,7 +226,7 @@ def main():
         filename = os.path.split(f)[1][:-4]
         onnx_pred, onnx_time = model_inference(
             config, preprocess_input, feature_net_session, rpn_head_session, 
-            rcnn_head_session, mask_head_session, rcnn_crop, filename
+            rcnn_head_session, mask_head_session, nodule_cls_session, rcnn_crop, filename
         )
 
         @timer_func
@@ -221,28 +237,30 @@ def main():
             return final_pred
 
         final_pred, post_time = post_process()
-        print(final_pred.max())
         save_seg_nrrd(filename, final_pred, direction, spacing, origin)
-        print((f'#{idx} {filename} [{onnx_pred.shape}] pre {p_time:.4f} '
-               f'ONNX inference {onnx_time:.4f} post {post_time:.4f}'))
+        save_seg_nrrd(f'{filename}_onnx', onnx_pred, direction, spacing, origin)
+        # print((f'#{idx} {filename} [{onnx_pred.shape}] pre {p_time:.4f} ',
+        #        f'ONNX inference {onnx_time:.4f} post {post_time:.4f}'))
 
 
         
-        input_image_t = torch.from_numpy(input_image)
-        input_image_t = input_image_t.to('cpu')
-        torch_pred, torch_time = torch_inference(nodulenet, input_image_t)
+        preprocess_input_t = torch.from_numpy(preprocess_input)
+        preprocess_input_t = preprocess_input_t.to('cpu')
+        torch_pred, torch_time = torch_inference(nodulenet, preprocess_input_t)
 
         def to_numpy(tensor):
             return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
         torch_pred = to_numpy(torch_pred)
         total_time['onnx'].append(onnx_time)
         total_time['torch'].append(torch_time)
+        total_time['pre'].append(p_time)
+        total_time['post'].append(post_time)
         print((f'#{idx} {filename} [{torch_pred.shape}] pre {p_time:.4f} '
-               f'ONNX inference {onnx_time:.4f} Torch inference {torch_time:.4f}'))
+               f'ONNX inference {onnx_time:.4f} Torch inference {torch_time:.4f} post {post_time:.4f}'))
         error_check(onnx_pred, torch_pred)
     # print(total_time)
 
-    for process_name in ['onnx', 'torch']:
+    for process_name in total_time:
         print(process_name)
         print(30*'-')
         min_time = np.min(total_time[process_name])

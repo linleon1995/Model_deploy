@@ -19,7 +19,7 @@ def rcnn_decode(window, delta, weight):
     return  box_transform_inv(window, delta, weight)
 
 
-def rcnn_nms(cfg, mode, inputs, proposals, logits, deltas):
+def rcnn_nms(cfg, mode, inputs, proposals, logits, deltas, max_bboxs=150):
 
     if mode in ['train',]:
         nms_pre_score_threshold = cfg['rcnn_train_nms_pre_score_threshold']
@@ -61,6 +61,9 @@ def rcnn_nms(cfg, mode, inputs, proposals, logits, deltas):
         proposal = proposals[index]
         # mask = masks[index]
         # cats = np.argmax(prob, 1)
+        prob, sorted_indices = torch.sort(prob, descending=True)
+        if max_bboxs < prob.shape[0]:
+            prob = prob[:max_bboxs]
 
         for j in range(1, num_class): #skip background
             idx = torch.where(prob[:, j] > nms_pre_score_threshold)[0]

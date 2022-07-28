@@ -104,7 +104,7 @@ net_config = {
     'rpn_train_nms_num': 300,
     'rpn_train_nms_pre_score_threshold': 0.5,
     'rpn_train_nms_overlap_threshold': 0.1,
-    'rpn_test_nms_pre_score_threshold': 0.7,
+    'rpn_test_nms_pre_score_threshold': 0.5,
     'rpn_test_nms_overlap_threshold': 0.1,
 
     # false positive reduction network configuration
