@@ -92,11 +92,11 @@ def rpn_nms(cfg, mode, inputs, window, logits_flat, deltas_flat):
         proposal = [torch.empty((0, 8)).float()]
         # proposal = [torch.empty((0, 8),np.float32),]
 
-        # ps = logits[b, : , 0].reshape(-1, 1)
-        # ds = deltas[b, :, :]
-        ps = logits[b, : , 0].reshape(-1, 1).cuda()
-        ds = deltas[b, :, :].cuda()
-        window = window.cuda()
+        ps = logits[b, : , 0].reshape(-1, 1)
+        ds = deltas[b, :, :]
+        # ps = logits[b, : , 0].reshape(-1, 1).cuda()
+        # ds = deltas[b, :, :].cuda()
+        # window = window.cuda()
 
         # Only those anchor boxes larger than a pre-defined threshold
         # will be chosen for nms computation
@@ -109,12 +109,12 @@ def rpn_nms(cfg, mode, inputs, window, logits_flat, deltas_flat):
         box = rpn_decode(w, d, cfg['box_reg_weight'])
         box = clip_boxes(box, inputs.shape[2:])
 
-        box = box.cuda()
+        # box = box.cuda()
         output = torch.cat((p, box), 1)
         # output = np.concatenate((p, box),1)
 
         # output = torch.from_numpy(output)
-        
+
         # TODO: torch_nms casue two ONNX TracerWarning, command this temporally.
         # 1. while order.shape[0] > 0: 2. return dets[keep], torch.LongTensor(keep)
         # output, keep = torch_nms(output, nms_overlap_threshold)

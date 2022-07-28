@@ -11,22 +11,12 @@ from model2.nodulenet.config import config
 # from model2.nodulenet.config import net_config as config
 from model2.nodulenet.utils.util import center_box_to_coord_box, ext2factor, clip_boxes, crop_boxes2mask_single, pad2factor
 from model2.nodulenet.nodule_net import crop_mask_regions, NoduleNet
-from model2.nodulenet.utils.LIDC.preprocess_TMH import load_itk_image, preprocess_op
+from model2.nodulenet.utils.LIDC.preprocess_TMH import load_itk_image, preprocess_op, preprocess_op_new
+
 from ONNX import ONNX_inference_from_session
-
 from deploy_torch import prepare_model
+from utils import timer_func
 
-
-def timer_func(func):
-    # This function shows the execution time of 
-    # the function object passed
-    def wrap_func(*args, **kwargs):
-        t1 = time.time()
-        result = func(*args, **kwargs)
-        t2 = time.time()
-        # print(f'Function {func.__name__!r} executed in {(t2-t1):.4f}s')
-        return result, t2-t1
-    return wrap_func
 
 @timer_func
 def model_inference(
@@ -89,7 +79,7 @@ def model_inference(
                 rcnn_logits, rcnn_deltas
             ) 
 
-        # pred_mask = np.zeros(list(inputs.shape[2:]))
+        pred_mask = np.zeros(list(inputs.shape[2:]))
         if use_mask and len(detections):
             # keep batch index, z, y, x, d, h, w, class
             if len(detections):
@@ -119,7 +109,8 @@ def model_inference(
 
                 # TODO: cuda
                 # mask_probs.append(torch.where(m.cuda()))
-                mask_probs.append(torch.where(m))
+                # mask_probs.append(torch.where(m))
+                mask_probs.append(m)
 
             mask_keep = mask_nms(cfg, mode, mask_probs, crop_boxes, inputs)
             crop_boxes = crop_boxes[mask_keep]
@@ -130,7 +121,11 @@ def model_inference(
                 out_masks.append(mask_probs[keep_idx])
             mask_probs = out_masks
             
-            pred_mask = crop_mask_regions(mask_probs, crop_boxes, features[0].shape)
+            # pred_mask = crop_mask_regions(mask_probs, crop_boxes, features[0].shape)
+            mask_probs = crop_mask_regions(mask_probs, crop_boxes)
+            segments = [torch.sigmoid(m) > 0.5 for m in mask_probs]
+            pred_mask = crop_boxes2mask_single(crop_boxes[:, 1:], segments, inputs.shape[2:])
+    
     pred_mask = pred_mask.numpy()
 
     # save_dir = f'plot/final/{filename}'
@@ -144,12 +139,12 @@ def model_inference(
     #         fig.savefig(os.path.join(save_dir, f'{filename}_{idx}.png'))
     return pred_mask
 
+
 @timer_func
 def torch_inference(nodulenet, input_image):
     with torch.no_grad():
         torch_pred = nodulenet(input_image)
     return torch_pred
-
 
 
 def error_check(onnx_pred, torch_pred):
@@ -158,9 +153,11 @@ def error_check(onnx_pred, torch_pred):
 
 def main():
     # f = rf'C:\Users\test\Desktop\Leon\Datasets\TMH_Nodule-preprocess\merge_wrong\TMH0003\raw\38467158349469692405660363178115017.mhd'
-    # lung_f = '38467158349469692405660363178115017'
+    lung_f = '38467158349469692405660363178115017'
     total_time = {'onnx': [], 'torch': []}
-    f_list = glob.glob(rf'D:\Leon\Datasets\TMH-preprocess\preprocess_old\*_clean.nrrd')
+    f_list = glob.glob(rf'C:\Users\test\Desktop\Leon\Datasets\TMH_Nodule-preprocess\merge_old\**\*.mhd', recursive=True)
+    f_list = [f for f in f_list if 'raw' in f]
+    # f_list = glob.glob(rf'D:\Leon\Datasets\TMH-preprocess\preprocess_old\*_clean.nrrd')
     nodulenet = NoduleNet(config)
     print(f'Device {next(nodulenet.parameters()).device}')
     prepare_model(nodulenet, config, use_cuda=False)
@@ -169,6 +166,8 @@ def main():
     for idx, f in enumerate(f_list):
         # if idx>2: break
         input_image, origin, spacing = load_itk_image(f)
+        _, _, input_image, preprocess_time = preprocess_op_new(input_image, spacing)
+        p_time = sum(list(preprocess_time.values()))
         # input_image, _, _ = preprocess_op(input_image, spacing, lung_f)
         input_image, pad = pad2factor(input_image)
 
@@ -189,7 +188,6 @@ def main():
                                                rcnn_head_session, mask_head_session, rcnn_crop, filename)
         input_image_t = torch.from_numpy(input_image)
         input_image_t = input_image_t.to('cpu')
-        # input_image_t.to('cpu')
         torch_pred, torch_time = torch_inference(nodulenet, input_image_t)
 
         def to_numpy(tensor):
@@ -197,7 +195,7 @@ def main():
         torch_pred = to_numpy(torch_pred)
         total_time['onnx'].append(onnx_time)
         total_time['torch'].append(torch_time)
-        print(onnx_time, torch_time)
+        print(f'pre {p_time:.4f} ONNX inference {onnx_time:.4f} Torch inference {torch_time:.4f}')
         error_check(onnx_pred, torch_pred)
     # print(total_time)
 

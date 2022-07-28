@@ -8,6 +8,18 @@ import SimpleITK as sitk
 import pandas as pd
 import torch
 # import matplotlib.pyplot as plt
+import time
+import cc3d
+
+from utils import timer_func
+
+
+
+@timer_func
+def torch_inference(nodulenet, input_image):
+    with torch.no_grad():
+        torch_pred = nodulenet(input_image)
+    return torch_pred
 
 
 def load_itk_image(filename):
@@ -369,7 +381,7 @@ def seperate_two_lung(binary_mask, spacing, max_iter=22, max_ratio=4.8):
 
     return binary_mask1, binary_mask2
 
-
+@timer_func
 def extract_lung(image, spacing):
     """
     Preprocess pipeline for extracting the lung from the raw 3D CT image.
@@ -405,7 +417,7 @@ def extract_lung(image, spacing):
 
     return (binary_mask1, binary_mask2, has_lung)
 
-
+@timer_func
 def HU2uint8(image, HU_min=-1200.0, HU_max=600.0, HU_nan=-2000.0):
     """
     Convert HU unit into uint8 values. First bound HU values by predfined min
@@ -492,6 +504,7 @@ def apply_mask(image, binary_mask1, binary_mask2, pad_value=170,
     return image_new
 
 
+@timer_func
 def resample(image, spacing, new_spacing=[1.0, 1.0, 1.0], order=1):
     """
     Resample image from the original spacing to new_spacing, e.g. 1x1x1
@@ -536,6 +549,7 @@ def resample2(image, spacing, new_spacing=[1.0, 1.0, 1.0], order=1, mode='trilin
     return (zoomed[0, 0], resample_spacing)
 
 
+@timer_func
 def get_lung_box(binary_mask, new_shape, margin=5):
     """
     Get the lung barely surrounding the lung based on the binary_mask and the
@@ -635,8 +649,8 @@ def preprocess_op(ct_img, spacing, filename):
     t2 = time.time()
     # binary_mask1, binary_mask2, has_lung = extract_lung(ct_img, spacing)
     # lung_mask = binary_mask1+binary_mask2
-    lung_path = rf'C:\Users\test\Desktop\Leon\Weekly\0705'
-    lung_mask = np.load(os.path.join(lung_path, f'{filename}.npy'))
+    # lung_path = rf'C:\Users\test\Desktop\Leon\Weekly\0705'
+    # lung_mask = np.load(os.path.join(lung_path, f'{filename}.npy'))
     # print('lung', lung_mask.max(), lung_mask.min(), lung_mask.shape)
     lung_mask = np.where(lung_mask>0, 1, 0)
     # print('lung', lung_mask.max(), lung_mask.min(), lung_mask.shape)
@@ -666,3 +680,56 @@ def preprocess_op(ct_img, spacing, filename):
     print(f'lung masking {t5-t4}')
     print(f'Total (preprocess) {t5-t1}')
     return seg_img, resampled_img, lung_box
+
+
+def timer_func(func):
+    # This function shows the execution time of 
+    # the function object passed
+    def wrap_func(*args, **kwargs):
+        t1 = time.time()
+        result = func(*args, **kwargs)
+        t2 = time.time()
+        # print(f'Function {func.__name__!r} executed in {(t2-t1):.4f}s')
+        return result, t2-t1
+    return wrap_func
+
+
+def preprocess_op_new(ct_img, spacing):
+    img, t1 = HU2uint8(ct_img)
+    # Extract lung mask
+    @timer_func
+    def get_lung_mask(img):
+        (binary_mask1, binary_mask2, has_lung), _ = extract_lung(img, spacing)
+        lung_mask_vol = np.where(binary_mask1+binary_mask2>0, 1, 0)
+        z_range, y_range, x_range = np.where(lung_mask_vol)
+        z_min, z_max = z_range.min(), z_range.max()
+        lung_mask_vol = scipy.ndimage.binary_dilation(
+            lung_mask_vol, structure=np.ones((7, 7, 7)), iterations=2)
+        lung_mask_vol[:z_min] = 0
+        lung_mask_vol[z_max:] = 0
+        return lung_mask_vol
+
+    lung_mask, t2 = get_lung_mask(ct_img)
+    seg_img = lung_mask * img
+    # seg_img = lung_mask * img
+    
+    # resample image
+    (resample_img, resampled_spacing), t3 = resample(seg_img, spacing, order=3)
+    # (resample_lung_mask, _), t5 = resample2(lung_mask, spacing, mode='nearest')
+    # seg_img = resample_lung_mask * resample_img
+    
+    # lung masking
+    lung_box, t6 = get_lung_box(lung_mask, resample_img.shape)
+    z_min, z_max = lung_box[0]
+    y_min, y_max = lung_box[1]
+    x_min, x_max = lung_box[2]
+    # seg_img = seg_img[z_min:z_max, y_min:y_max, x_min:x_max]
+    resample_img = resample_img[z_min:z_max, y_min:y_max, x_min:x_max]
+
+    preprocess_time = {
+        'HU2Image': t1,
+        'Lung_Mask': t2,
+        'Resample': t3,
+        'Lung_box': t6,
+    }
+    return seg_img, lung_box, resample_img, preprocess_time

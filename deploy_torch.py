@@ -35,7 +35,9 @@ def prepare_model(net, config, use_cuda=True):
     if use_cuda:
         net.cuda()
     initial_checkpoint = config['initial_checkpoint']
-    checkpoint = torch.load(initial_checkpoint)
+    # checkpoint = torch.load(initial_checkpoint)
+    # TODO: GPU to CPU
+    checkpoint = torch.load(initial_checkpoint, map_location=lambda storage, loc: storage)
     net.load_state_dict(checkpoint['state_dict'], strict=False)
     net.set_mode('eval')
     net.use_mask = True

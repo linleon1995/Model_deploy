@@ -278,12 +278,12 @@ class MaskHead(nn.Module):
             # TODO: cause GPU run out of memory
             # This is not workable in training -->
             # RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
-            mask = Variable(torch.zeros((D, H, W))).cuda()
-            # mask = Variable(torch.zeros((D, H, W)))
+            # mask = Variable(torch.zeros((D, H, W))).cuda()
+            mask = Variable(torch.zeros((D, H, W)))
             mask[z_start:z_end, y_start:y_end, x_start:x_end] = out_mask
-            # mask = mask.unsqueeze(0)
-            # out.append(mask)
-            out.append(torch.where(mask))
+            mask = mask.unsqueeze(0)
+            out.append(mask)
+            # out.append(torch.where(mask))
             
             # TODO: cause GPU run out of memory
             # This is not workable in training -->
@@ -291,29 +291,29 @@ class MaskHead(nn.Module):
             # mask = Variable(torch.zeros((D, H, W))).cuda()
             # if idx > 1: break
             
-        # out = torch.cat(out, 0)
+        out = torch.cat(out, 0)
         return out
 
 # TODO: use crop_boxes
-def crop_mask_regions(masks, crop_boxes, out_shape):
-    out_mask = torch.zeros(out_shape)
-    for i in range(len(crop_boxes)):
-        post_indices = torch.stack(masks[i], dim=0)
-        b, z_start, y_start, x_start, z_end, y_end, x_end, cat = crop_boxes[i]
-        out_mask[(
-            torch.arange(out_mask.shape[0]), torch.arange(out_mask.shape[1]), 
-            post_indices[0], post_indices[1], post_indices[2]
-        )] = i+1
-    return out_mask
-
-
-# def crop_mask_regions(masks, crop_boxes):
-#     out = []
+# def crop_mask_regions(masks, crop_boxes, out_shape):
+#     out_mask = torch.zeros(out_shape)
 #     for i in range(len(crop_boxes)):
+#         post_indices = torch.stack(masks[i], dim=0)
 #         b, z_start, y_start, x_start, z_end, y_end, x_end, cat = crop_boxes[i]
-#         m = masks[i][z_start:z_end, y_start:y_end, x_start:x_end].contiguous()
-#         out.append(m)
-#     return out
+#         out_mask[(
+#             torch.arange(out_mask.shape[0]), torch.arange(out_mask.shape[1]), 
+#             post_indices[0], post_indices[1], post_indices[2]
+#         )] = i+1
+#     return out_mask
+
+
+def crop_mask_regions(masks, crop_boxes):
+    out = []
+    for i in range(len(crop_boxes)):
+        b, z_start, y_start, x_start, z_end, y_end, x_end, cat = crop_boxes[i]
+        m = masks[i][z_start:z_end, y_start:y_end, x_start:x_end].contiguous()
+        out.append(m)
+    return out
 
 
 def top1pred(boxes):
@@ -609,7 +609,8 @@ class NoduleNet(nn.Module):
                 
                 # Make sure to keep feature maps not splitted by data parallel
                 features = [t.unsqueeze(0).expand(torch.cuda.device_count(), -1, -1, -1, -1, -1) for t in features]
-                self.mask_probs = self.mask_head(torch.from_numpy(self.crop_boxes).cuda(), features)
+                self.mask_probs = self.mask_head(torch.from_numpy(self.crop_boxes), features)
+                # self.mask_probs = self.mask_head(torch.from_numpy(self.crop_boxes).cuda(), features)
 
                 mask_keep = mask_nms(self.cfg, self.mode, self.mask_probs, self.crop_boxes, inputs)
                 self.crop_boxes = self.crop_boxes[mask_keep]
@@ -620,7 +621,11 @@ class NoduleNet(nn.Module):
                     out_masks.append(self.mask_probs[keep_idx])
                 self.mask_probs = out_masks
                 
-                pred_mask = crop_mask_regions(self.mask_probs, self.crop_boxes, features[0][0].shape)
+                mask_probs = crop_mask_regions(self.mask_probs, self.crop_boxes)
+                segments = [torch.sigmoid(m) > 0.5 for m in mask_probs]
+                pred_mask = crop_boxes2mask_single(self.crop_boxes[:, 1:], segments, inputs.shape[2:])
+    
+                # pred_mask = crop_mask_regions(self.mask_probs, self.crop_boxes, features[0][0].shape)
 
                 # # segments = [torch.sigmoid(m).cpu().numpy() > 0.5 for m in self.mask_probs]
                 # segments = [torch.sigmoid(m) > 0.5 for m in self.mask_probs]
