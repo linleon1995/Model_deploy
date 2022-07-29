@@ -177,7 +177,9 @@ elif train_config['optimizer'] == 'RMSprop':
 train_config['RESULTS_DIR'] = os.path.join(train_config['ROOT_DIR'], 'results')
 train_config['out_dir'] = os.path.join(train_config['RESULTS_DIR'], 'cross_val_test')
 train_config['initial_checkpoint'] = None #train_config['out_dir'] + '/model/027.ckpt'
-train_config['initial_checkpoint'] = rf'300.pt' #train_config['out_dir'] + '/model/027.ckpt'
+# train_config['initial_checkpoint'] = rf'300.pt' #train_config['out_dir'] + '/model/027.ckpt'
+train_config['initial_checkpoint'] = rf'checckpoint/300.ckpt' #train_config['out_dir'] + '/model/027.ckpt'
+# train_config['initial_checkpoint'] = rf'200.ckpt' #train_config['out_dir'] + '/model/027.ckpt'
 # train_config['initial_checkpoint'] = rf'D:\Leon\stuff\nodulenet\tmh\4_train\model\300.ckpt' #train_config['out_dir'] + '/model/027.ckpt'
 # train_config['initial_checkpoint'] = 'results/cross_val_test/model/300.ckpt' #train_config['out_dir'] + '/model/027.ckpt'
 # train_config['initial_checkpoint'] = 'results/cross_val_test/model/300_old/300.ckpt' #train_config['out_dir'] + '/model/027.ckpt'
