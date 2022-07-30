@@ -85,6 +85,7 @@ def model_inference(
                 crop_boxes[:, 1:-1] = clip_boxes(crop_boxes[:, 1:-1], inputs.shape[2:])
             
             mask_probs = []
+            mask_probs_for_nms = []
             for detection in crop_boxes:
                 b, z_start, y_start, x_start, z_end, y_end, x_end, cat = detection
                 im = features[0][:, :, z_start:z_end, y_start:y_end, x_start:x_end]
@@ -97,22 +98,23 @@ def model_inference(
                     # mask_session.get_inputs()[3].name: features[3],
                 }
                 mask_prob = torch.from_numpy(mask_session.run(None, ort_inputs)[0][0, 0])
-                m = torch.zeros(features[0][0, 0].shape)
-                m[z_start:z_end, y_start:y_end, x_start:x_end] = mask_prob
+                # m = torch.zeros(features[0][0, 0].shape)
+                # m[z_start:z_end, y_start:y_end, x_start:x_end] = mask_prob
 
                 # TODO: cuda
-                # mask_probs.append(torch.where(m.cuda()))
-                # mask_probs.append(torch.where(m))
-                mask_probs.append(m)
+                # TODO: optimize code
+                mask_probs_for_nms.append((mask_prob, features[0][0, 0].shape))
+                # mask_probs.append(mask_prob)
 
-            mask_keep = mask_nms(cfg, mode, mask_probs, crop_boxes, inputs)
+            mask_keep, mask_probs = mask_nms(cfg, mode, mask_probs_for_nms, crop_boxes, inputs)
             crop_boxes = crop_boxes[mask_keep]
             detections = detections[mask_keep]
             # mask_probs = mask_probs[mask_keep]
-            out_masks = []
-            for keep_idx in mask_keep:
-                out_masks.append(mask_probs[keep_idx])
-            mask_probs = out_masks
+
+            # out_masks = []
+            # for keep_idx in mask_keep:
+            #     out_masks.append(mask_probs[keep_idx])
+            # mask_probs = out_masks
             
             # pred_mask = crop_mask_regions(mask_probs, crop_boxes, features[0].shape)
             mask_probs = crop_mask_regions(mask_probs, crop_boxes)
@@ -254,7 +256,7 @@ def main():
     rcnn_crop = nodulenet.rcnn_crop
 
     for idx, f in enumerate(f_list):
-        # if idx>2: break
+        if idx>2: break
         # if '6078425' not in f:
         # # if '6078425' not in f and '5663418' not in f and '570456' not in f and '50888' not in f:
         #     continue
@@ -285,6 +287,7 @@ def main():
             final_pred = resample_back(post_pred, np.ones(3, np.float), spacing)
             return final_pred
         final_pred, post_time = post_process(cls_pred)
+        save_seg_nrrd(os.path.join('output', filename), final_pred, direction, spacing, origin)
 
 
         preprocess_input_t = torch.from_numpy(preprocess_input)
@@ -296,18 +299,32 @@ def main():
 
         # Post processing
         final_pred, post_time = post_process(torch_pred)
-        save_seg_nrrd(os.path.join('output', filename), final_pred, direction, spacing, origin)
+        save_seg_nrrd(os.path.join('output', f'{filename}_torch'), final_pred, direction, spacing, origin)
+
 
         total_time['onnx'].append(onnx_time)
         total_time['torch'].append(torch_time)
         total_time['pre'].append(p_time)
         total_time['post'].append(post_time)
         total_time['cls'].append(cls_time)
-        print((f'#{idx} {filename} [{torch_pred.shape}] pre {p_time:.4f} ',
-               f'ONNX inference {onnx_time:.4f} Torch inference {torch_time:.4f} ',
-               f'cls {cls_time:.4f} post {post_time:.4f}' ))
-
+        print(f'#{idx} {filename} [{torch_pred.shape}] pre {p_time:.4f} ',
+              f'ONNX inference {onnx_time:.4f} Torch inference {torch_time:.4f} ',
+              f'cls {cls_time:.4f} post {post_time:.4f}' )
         # error_check(onnx_pred, torch_pred)
+
+        if idx > 0 and idx%10==0:
+            for process_name in total_time:
+                print(process_name)
+                print(30*'-')
+                min_time = np.min(total_time[process_name])
+                max_time = np.max(total_time[process_name])
+                mean_time = np.mean(total_time[process_name])
+                std_time = np.std(total_time[process_name])
+
+                print(f'Min {min_time:.4f}')
+                print(f'Max {max_time:.4f}')
+                print(f'Mean {mean_time:.4f} \u00B1 {std_time:.4f}')
+                print('')
 
     for process_name in total_time:
         print(process_name)

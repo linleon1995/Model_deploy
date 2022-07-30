@@ -265,10 +265,10 @@ def NoduleNet_to_ONNX_split():
     )
                   
     with torch.no_grad():
-        # feature_net = torch_to_ONNX_3d(dummy_input, feature_net, "feature_net.onnx")
-        # rpn_head = torch_to_ONNX_3d(rpn_input, rpn_head, "rpn_head.onnx")
-        # rcnn_head = torch_to_ONNX_3d(rcnn_input, rcnn_head, "rcnn_head.onnx")
-        mask_head = torch_to_ONNX_3d(mask_input, mask_head, "mask_head.onnx")
+        feature_net = torch_to_ONNX_3d(dummy_input, feature_net, "f.onnx")
+        rpn_head = torch_to_ONNX_3d(rpn_input, rpn_head, "r.onnx")
+        rcnn_head = torch_to_ONNX_3d(rcnn_input, rcnn_head, "c_head.onnx")
+        mask_head = torch_to_ONNX_3d_mask(mask_input, mask_head, "m.onnx")
 
 
 def main():

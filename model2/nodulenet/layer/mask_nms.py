@@ -5,11 +5,12 @@ import numpy as np
 
 
 
-def mask_nms(cfg, mode, mask_logits, crop_boxes, inputs):
+def mask_nms(cfg, mode, mask_logits_and_mask_shape, crop_boxes, inputs):
     nms_overlap_threshold   = cfg['mask_test_nms_overlap_threshold']
     batch_size, _, depth, height, width = inputs.size() #original image width
     num_class = cfg['num_class']
     keep_ids = []
+    out_mask_probs = []
 
     for b in range(batch_size):
         crop_boxes_batch = crop_boxes[crop_boxes[:, 0] == b]
@@ -27,25 +28,34 @@ def mask_nms(cfg, mode, mask_logits, crop_boxes, inputs):
             bbox = crop_boxes[cur]
             cur_z_start, cur_y_start, cur_x_start, cur_z_end, cur_y_end, cur_x_end = bbox[1:-1]
             # mask1 = mask_logits[cur][z_start:z_end, y_start:y_end, x_start:x_end]
-            mask1_vol = mask_logits2probs(mask_logits[cur])
+            mask_prob, mask_shape = mask_logits_and_mask_shape[cur]
+            mask1 = torch.zeros(mask_shape)
+            mask1[cur_z_start:cur_z_end, cur_y_start:cur_y_end, cur_x_start:cur_x_end] = mask_prob
+
+            mask1_vol = mask_logits2probs(mask1)
             # mask1 = mask_logits2probs(mask_logits[cur])
+            out_mask_probs.append(torch.from_numpy(mask1_vol))
             for i in range(cur + 1, n):
                 bbox = crop_boxes[i]
-                z_start, y_start, x_start, z_end, y_end, x_end = bbox[1:-1]
+                i_z_start, i_y_start, i_x_start, i_z_end, i_y_end, i_x_end = bbox[1:-1]
                 # TODO: boundary condition
                 z_start, y_start, x_start = np.min(
                     np.array([
                         [cur_z_start, cur_y_start, cur_x_start],
-                        [z_start, y_start, x_start]
+                        [i_z_start, i_y_start, i_x_start]
                     ]), axis=0
                 )
                 z_end, y_end, x_end = np.max(
                     np.array([
                         [cur_z_end, cur_y_end, cur_x_end],
-                        [z_end, y_end, x_end]
+                        [i_z_end, i_y_end, i_x_end]
                     ]), axis=0
                 )
-                mask2 = mask_logits[i][z_start:z_end, y_start:y_end, x_start:x_end]
+
+                mask_prob, mask_shape = mask_logits_and_mask_shape[i]
+                mask2 = torch.zeros(mask_shape)
+                mask2[i_z_start:i_z_end, i_y_start:i_y_end, i_x_start:i_x_end] = mask_prob
+                mask2 = mask2[z_start:z_end, y_start:y_end, x_start:x_end]
                 mask2 = mask_logits2probs(mask2)
                 mask1 = mask1_vol[z_start:z_end, y_start:y_end, x_start:x_end]
                 # mask2 = mask_logits2probs(mask_logits[i])
@@ -54,7 +64,7 @@ def mask_nms(cfg, mode, mask_logits, crop_boxes, inputs):
             
             cur += 1
 
-    return keep_ids
+    return keep_ids, out_mask_probs
 
 
 def mask_iou(mask1, mask2):

@@ -1,22 +1,44 @@
 import copy
 import os
+import argparse
 
+import numpy as np
 import torch
 import onnxruntime
-import matplotlib.pyplot as plt
-import glob
-
-from model2.nodulenet.layer import *
-from model2.nodulenet.config import config
-# from model2.nodulenet.config import net_config as config
-from model2.nodulenet.utils.util import center_box_to_coord_box, ext2factor, clip_boxes, crop_boxes2mask_single, pad2factor
-from model2.nodulenet.nodule_net import crop_mask_regions, NoduleNet
-from model2.nodulenet.utils.LIDC.preprocess_TMH import load_itk_image, preprocess_op, preprocess_op_new, resample2
-
 from ONNX import ONNX_inference_from_session
-from deploy_torch import prepare_model
+
+# from model2.nodulenet.layer import *
+from model2.nodulenet.layer.rpn_nms import make_rpn_windows, rpn_nms
+from model2.nodulenet.layer.rcnn_nms import rcnn_nms
+# from model2.nodulenet.layer.util import *
+from model2.nodulenet.layer.mask_nms import mask_nms
+from model2.nodulenet.config import config
+from model2.nodulenet.utils.util import (
+    center_box_to_coord_box, ext2factor, clip_boxes, crop_boxes2mask_single, pad2factor)
+from model2.nodulenet.nodule_net import crop_mask_regions, NoduleNet
+from model2.nodulenet.utils.LIDC.preprocess_TMH import (
+    load_itk_image, preprocess_op_new, resample2)
+# from deploy_torch import prepare_model
 from utils import timer_func
 from nodule_to_nrrd import seg_nrrd_write
+
+
+parser = argparse.ArgumentParser() 
+parser.add_argument('--input', type=str, required=True,  help='Input file')
+
+
+# def prepare_model(net, config, use_cuda=True):
+#     if use_cuda:
+#         net.cuda()
+#     initial_checkpoint = config['initial_checkpoint']
+#     # checkpoint = torch.load(initial_checkpoint)
+#     # TODO: GPU to CPU
+#     print(os.getcwd())
+#     checkpoint = torch.load(initial_checkpoint, map_location=lambda storage, loc: storage)
+#     net.load_state_dict(checkpoint['state_dict'], strict=True)
+#     net.set_mode('eval')
+#     net.use_mask = True
+#     net.use_rcnn = True
 
 
 @timer_func
@@ -29,19 +51,12 @@ def model_inference(
     max_bboxs = None
 
     # Image feature
-    # features, feat_4 = feature_net(inputs); #print('fs[-1] ', fs[-1].shape)
     features = ONNX_inference_from_session(inputs, feature_net_session)
-    # ort_inputs = {
-    #     ort_session.get_inputs()[0].name: inputs,
-    # }
-    # # ort_inputs = {ort_session.get_inputs()[0].name: inputs}
-    # features, feat_4 = ort_session.run(None, ort_inputs)
 
     fs = features[-2]
     feat_4 = features[-1]
 
     # RPN proposals
-    # rpn_logits_flat, rpn_deltas_flat = rpn(fs)
     rpn_logits, rpn_deltas = ONNX_inference_from_session(fs, rpn_session)
 
     b,D,H,W,_,num_class = rpn_logits.shape
@@ -61,7 +76,6 @@ def model_inference(
     if use_rcnn:
         rpn_proposals = rpn_nms(cfg, mode, inputs, rpn_window,
                 rpn_logits_flat, rpn_deltas_flat)
-        # print 'length of rpn proposals', rpn_proposals.shape
 
     # RCNN proposals
     detections = copy.deepcopy(rpn_proposals)
@@ -93,9 +107,8 @@ def model_inference(
                 crop_boxes[:, 1:-1] = ext2factor(crop_boxes[:, 1:-1], 4)
                 crop_boxes[:, 1:-1] = clip_boxes(crop_boxes[:, 1:-1], inputs.shape[2:])
             
-            # mask_probs = ONNX_inference_from_session(features, mask_session)
-            # a = mask_session.get_inputs()
             mask_probs = []
+            mask_probs_for_nms = []
             for detection in crop_boxes:
                 b, z_start, y_start, x_start, z_end, y_end, x_end, cat = detection
                 im = features[0][:, :, z_start:z_end, y_start:y_end, x_start:x_end]
@@ -108,22 +121,23 @@ def model_inference(
                     # mask_session.get_inputs()[3].name: features[3],
                 }
                 mask_prob = torch.from_numpy(mask_session.run(None, ort_inputs)[0][0, 0])
-                m = torch.zeros(features[0][0, 0].shape)
-                m[z_start:z_end, y_start:y_end, x_start:x_end] = mask_prob
+                # m = torch.zeros(features[0][0, 0].shape)
+                # m[z_start:z_end, y_start:y_end, x_start:x_end] = mask_prob
 
                 # TODO: cuda
-                # mask_probs.append(torch.where(m.cuda()))
-                # mask_probs.append(torch.where(m))
-                mask_probs.append(m)
+                # TODO: optimize code
+                mask_probs_for_nms.append((mask_prob, features[0][0, 0].shape))
+                # mask_probs.append(mask_prob)
 
-            mask_keep = mask_nms(cfg, mode, mask_probs, crop_boxes, inputs)
+            mask_keep, mask_probs = mask_nms(cfg, mode, mask_probs_for_nms, crop_boxes, inputs)
             crop_boxes = crop_boxes[mask_keep]
             detections = detections[mask_keep]
             # mask_probs = mask_probs[mask_keep]
-            out_masks = []
-            for keep_idx in mask_keep:
-                out_masks.append(mask_probs[keep_idx])
-            mask_probs = out_masks
+
+            # out_masks = []
+            # for keep_idx in mask_keep:
+            #     out_masks.append(mask_probs[keep_idx])
+            # mask_probs = out_masks
             
             # pred_mask = crop_mask_regions(mask_probs, crop_boxes, features[0].shape)
             mask_probs = crop_mask_regions(mask_probs, crop_boxes)
@@ -132,16 +146,6 @@ def model_inference(
             pred_mask = crop_boxes2mask_single(crop_boxes[:, 1:], segments, inputs.shape[2:])
     
     pred_mask = pred_mask.numpy()
-
-    # save_dir = f'plot/final/{filename}'
-    # os.makedirs(save_dir, exist_ok=True)
-    # for idx, p in enumerate(pred_mask[0, 0]):
-    #     if np.sum(p):
-    #         print(idx)
-    #         fig, ax = plt.subplots(1, 1)
-    #         ax.imshow(p)
-    #         ax.set_title('onnx output')
-    #         fig.savefig(os.path.join(save_dir, f'{filename}_{idx}.png'))
     return pred_mask
 
 
@@ -179,6 +183,7 @@ def crop_volume(volume, crop_range, crop_center):
                   row_interval[0]:row_interval[1], 
                   column_interval[0]:column_interval[1]]
 
+
 @timer_func
 def nodule_cls(raw_volume, pred_volume_category, onnx_session):
     """AI is creating summary for nodule_cls
@@ -207,13 +212,6 @@ def nodule_cls(raw_volume, pred_volume_category, onnx_session):
             pred_volume_category[pred_volume_category==nodule_id] = 0
     return pred_volume_category
     
-
-@timer_func
-def torch_inference(nodulenet, input_image):
-    with torch.no_grad():
-        torch_pred = nodulenet(input_image)
-    return torch_pred
-
 
 def error_check(onnx_pred, torch_pred):
     np.testing.assert_allclose(onnx_pred, torch_pred, rtol=1e-03, atol=1e-5)
@@ -257,97 +255,64 @@ def save_seg_nrrd(filename, ct_scan, direction, spacing, origin):
 
 
 def main():
-    total_time = {'onnx': [], 'torch': [], 'pre': [], 'post': [], 'cls': []}
-    f_list = glob.glob(rf'C:\Users\test\Desktop\Leon\Datasets\TMH_Nodule-preprocess\merge_old\**\*.mhd', recursive=True)
-    f_list = [f for f in f_list if 'raw' in f]
-    # f_list = glob.glob(rf'D:\Leon\Datasets\TMH-preprocess\preprocess_old\*_clean.nrrd')
-
+    input_file = args.input
     nodulenet = NoduleNet(config)
-    print(f'Device {next(nodulenet.parameters()).device}')
-    prepare_model(nodulenet, config, use_cuda=False)
-    nodulenet.eval()
+    pred_folder = 'predict'
+    model_folder = 'model'
+    os.makedirs(pred_folder, exist_ok=True)
 
-    feature_net_session = onnxruntime.InferenceSession("feature_net.onnx")
-    rpn_head_session = onnxruntime.InferenceSession("rpn_head.onnx")
-    rcnn_head_session = onnxruntime.InferenceSession("rcnn_head.onnx")
-    mask_head_session = onnxruntime.InferenceSession("mask_head.onnx")
-    nodule_cls_session = onnxruntime.InferenceSession("nodule_cls_ones.onnx")
+    feature_net_session = onnxruntime.InferenceSession(
+        os.path.join(model_folder, "f.onnx"))
+    rpn_head_session = onnxruntime.InferenceSession(
+        os.path.join(model_folder, "rp.onnx"))
+    rcnn_head_session = onnxruntime.InferenceSession(
+        os.path.join(model_folder, "rc.onnx"))
+    mask_head_session = onnxruntime.InferenceSession(
+        os.path.join(model_folder, "m.onnx"))
+    nodule_cls_session = onnxruntime.InferenceSession(
+        os.path.join(model_folder, "cls.onnx"))
     rcnn_crop = nodulenet.rcnn_crop
 
-    for idx, f in enumerate(f_list):
-        # if idx>2: break
-        if '6078425' not in f:
-        # if '6078425' not in f and '5663418' not in f and '570456' not in f and '50888' not in f:
-            continue
-        input_image, origin, spacing, direction = load_itk_image(f)
+    input_image, origin, spacing, direction = load_itk_image(input_file)
 
-        preprocess_result = preprocess_op_new(input_image, spacing)
-        _, lung_box, preprocess_input, shape_before_lung_box, preprocess_time = preprocess_result
-        # preprocess_input, _, _ = preprocess_op(input_image, spacing, lung_f)
-        p_time = sum(list(preprocess_time.values()))
-        preprocess_input, pad = pad2factor(preprocess_input)
-        preprocess_input = preprocess_input[None, None]
-        preprocess_input = (preprocess_input.astype(np.float32) - 128.) / 128.
+    preprocess_result = preprocess_op_new(input_image, spacing)
+    _, lung_box, preprocess_input, shape_before_lung_box, preprocess_time = preprocess_result
+    p_time = sum(list(preprocess_time.values()))
+    preprocess_input, pad = pad2factor(preprocess_input)
+    preprocess_input = preprocess_input[None, None]
+    preprocess_input = (preprocess_input.astype(np.float32) - 128.) / 128.
 
-        filename = os.path.split(f)[1][:-4]
-        onnx_pred, onnx_time = model_inference(
-            config, preprocess_input, feature_net_session, rpn_head_session, 
-            rcnn_head_session, mask_head_session, nodule_cls_session, rcnn_crop, filename
-        )
+    filename = os.path.split(input_file)[1][:-4]
+    onnx_pred, onnx_time = model_inference(
+        config, preprocess_input, feature_net_session, rpn_head_session, 
+        rcnn_head_session, mask_head_session, nodule_cls_session, rcnn_crop, filename
+    )
 
-        # Nodule classification
-        cls_pred, cls_time = nodule_cls(preprocess_input[0, 0], onnx_pred, nodule_cls_session)
+    # Nodule classification
+    cls_pred, cls_time = nodule_cls(preprocess_input[0, 0], onnx_pred, nodule_cls_session)
 
-        # Post processing
-        @timer_func
-        def post_process(pred):
-            post_pred = unpad(pred, pad)
-            post_pred = recover_lung_box(post_pred, lung_box, shape_before_lung_box)
-            final_pred = resample_back(post_pred, np.ones(3, np.float), spacing)
-            return final_pred
-        final_pred, post_time = post_process(cls_pred)
+    # Post processing
+    @timer_func
+    def post_process(pred):
+        post_pred = unpad(pred, pad)
+        post_pred = recover_lung_box(post_pred, lung_box, shape_before_lung_box)
+        final_pred = resample_back(post_pred, np.ones(3, np.float), spacing)
+        return final_pred
+    final_pred, post_time = post_process(cls_pred)
 
-        # save_seg_nrrd(os.path.join('output', filename), final_pred, direction, spacing, origin)
-        # save_seg_nrrd(f'{filename}_onnx', onnx_pred, direction, spacing, origin)
-        # print((f'#{idx} {filename} [{onnx_pred.shape}] pre {p_time:.4f} ',
-        #        f'ONNX inference {onnx_time:.4f} post {post_time:.4f}'))
+    # Output segmentation result
+    # folder = os.path.join(os.path.dirname(__file__), 'predict')
+    # print(folder, filename)
+    pred_f = os.path.dirname(os.path.realpath(__file__))
+    import sys
+    print()
+    print('ddd', sys.argv[0])
+    print('ddd', sys.executable)
+    save_seg_nrrd(os.path.join(sys.executable, pred_folder, filename), final_pred, direction, spacing, origin)
+    # save_seg_nrrd(filename, final_pred, direction, spacing, origin)
 
-        preprocess_input_t = torch.from_numpy(preprocess_input)
-        preprocess_input_t = preprocess_input_t.to('cpu')
-        torch_pred, torch_time = torch_inference(nodulenet, preprocess_input_t)
-        def to_numpy(tensor):
-            return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
-        torch_pred = to_numpy(torch_pred)
-
-        # Post processing
-        final_pred, post_time = post_process(torch_pred)
-        save_seg_nrrd(os.path.join('output', filename), final_pred, direction, spacing, origin)
-
-        total_time['onnx'].append(onnx_time)
-        total_time['torch'].append(torch_time)
-        total_time['pre'].append(p_time)
-        total_time['post'].append(post_time)
-        total_time['cls'].append(cls_time)
-        print((f'#{idx} {filename} [{torch_pred.shape}] pre {p_time:.4f} ',
-               f'ONNX inference {onnx_time:.4f} Torch inference {torch_time:.4f} ',
-               f'cls {cls_time:.4f} post {post_time:.4f}' ))
-
-        # error_check(onnx_pred, torch_pred)
-    # print(total_time)
-
-    for process_name in total_time:
-        print(process_name)
-        print(30*'-')
-        min_time = np.min(total_time[process_name])
-        max_time = np.max(total_time[process_name])
-        mean_time = np.mean(total_time[process_name])
-        std_time = np.std(total_time[process_name])
-
-        print(f'Min {min_time:.4f}')
-        print(f'Max {max_time:.4f}')
-        print(f'Mean {mean_time:.4f} \u00B1 {std_time:.4f}')
-        print('')
 
 if __name__ == '__main__':
+    args = parser.parse_args()
     main()
     

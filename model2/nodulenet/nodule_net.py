@@ -246,7 +246,7 @@ class MaskHead(nn.Module):
         out = []
         # N = detections.shape[0]
         # out = Variable(torch.zeros((N, D, H, W))).cuda()
-
+        mask_probs_for_nms = []
         for idx, detection in enumerate(detections):
             b, z_start, y_start, x_start, z_end, y_end, x_end, cat = detection
 
@@ -275,25 +275,28 @@ class MaskHead(nn.Module):
             out_mask = out_mask.int()
             # out_mask = torch.where(torch.sigmoid(logits)>0.5)
  
-            # TODO: cause GPU run out of memory
-            # This is not workable in training -->
-            # RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
-            # mask = Variable(torch.zeros((D, H, W))).cuda()
-            mask = Variable(torch.zeros((D, H, W)))
-            mask[z_start:z_end, y_start:y_end, x_start:x_end] = out_mask
-            mask = mask.unsqueeze(0)
-            out.append(mask)
-            # out.append(torch.where(mask))
+            # # TODO: cause GPU run out of memory
+            # # This is not workable in training -->
+            # # RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
+            # # mask = Variable(torch.zeros((D, H, W))).cuda()
+            # mask = Variable(torch.zeros((D, H, W)))
+            # mask[z_start:z_end, y_start:y_end, x_start:x_end] = out_mask
+            # mask = mask.unsqueeze(0)
+            # out.append(mask)
+            # # out.append(torch.where(mask))
             
-            # TODO: cause GPU run out of memory
-            # This is not workable in training -->
-            # RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
-            # mask = Variable(torch.zeros((D, H, W))).cuda()
-            # if idx > 1: break
+            # # TODO: cause GPU run out of memory
+            # # This is not workable in training -->
+            # # RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
+            # # mask = Variable(torch.zeros((D, H, W))).cuda()
+            # # if idx > 1: break
             
-        out = torch.cat(out, 0)
-        return out
-
+        # out = torch.cat(out, 0)
+        # return out
+            # TODO: bad implementation about shap slicing
+            mask_probs_for_nms.append((out_mask, features[0][0, 0, 0].shape))
+        return mask_probs_for_nms
+        
 # TODO: use crop_boxes
 # def crop_mask_regions(masks, crop_boxes, out_shape):
 #     out_mask = torch.zeros(out_shape)
@@ -483,13 +486,13 @@ class NoduleNet(nn.Module):
                 self.mask_probs = data_parallel(self.mask_head, (torch.from_numpy(self.crop_boxes).cuda(), features))
 
                 if self.mode in ['eval', 'test']:
-                    mask_keep = mask_nms(self.cfg, self.mode, self.mask_probs, self.crop_boxes, inputs)
+                    mask_keep, self.mask_probs = mask_nms(self.cfg, self.mode, self.mask_probs, self.crop_boxes, inputs)
                 #    self.crop_boxes = torch.index_select(self.crop_boxes, 0, mask_keep)
                 #    self.detections = torch.index_select(self.detections, 0, mask_keep)
                 #    self.mask_probs = torch.index_select(self.mask_probs, 0, mask_keep)
                     self.crop_boxes = self.crop_boxes[mask_keep]
                     self.detections = self.detections[mask_keep]
-                    self.mask_probs = self.mask_probs[mask_keep]
+                    # self.mask_probs = self.mask_probs[mask_keep]
                 
                 self.mask_probs = crop_mask_regions(self.mask_probs, self.crop_boxes)
 
@@ -612,14 +615,14 @@ class NoduleNet(nn.Module):
                 self.mask_probs = self.mask_head(torch.from_numpy(self.crop_boxes), features)
                 # self.mask_probs = self.mask_head(torch.from_numpy(self.crop_boxes).cuda(), features)
 
-                mask_keep = mask_nms(self.cfg, self.mode, self.mask_probs, self.crop_boxes, inputs)
+                mask_keep, self.mask_probs = mask_nms(self.cfg, self.mode, self.mask_probs, self.crop_boxes, inputs)
                 self.crop_boxes = self.crop_boxes[mask_keep]
                 self.detections = self.detections[mask_keep]
                 # self.mask_probs = self.mask_probs[mask_keep]
-                out_masks = []
-                for keep_idx in mask_keep:
-                    out_masks.append(self.mask_probs[keep_idx])
-                self.mask_probs = out_masks
+                # out_masks = []
+                # for keep_idx in mask_keep:
+                #     out_masks.append(self.mask_probs[keep_idx])
+                # self.mask_probs = out_masks
                 
                 mask_probs = crop_mask_regions(self.mask_probs, self.crop_boxes)
                 segments = [torch.sigmoid(m) > 0.5 for m in mask_probs]
