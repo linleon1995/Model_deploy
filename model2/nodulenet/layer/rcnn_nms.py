@@ -6,7 +6,7 @@ from torch.autograd import Variable
 try:
     from model2.nodulenet.utils.pybox import *
 except ImportError:
-    print('Warning: C++ module import failed! This should only happen in deployment')
+    # print('Warning: C++ module import failed! This should only happen in deployment')
     from model2.nodulenet.utils.util import py_nms as torch_nms
     from model2.nodulenet.utils.util import py_box_overlap as torch_overlap
 

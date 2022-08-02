@@ -12,23 +12,28 @@ import torch.onnx
 # import tensorrt as trt
 from model2.nodulenet.utils.util import crop_boxes2mask_single, pad2factor
 import glob
-from ONNX import torch_to_ONNX_3d, ONNX_inference, ONNX_inference_from_session
+from ONNX import torch_to_ONNX, torch_to_ONNX_3d, torch_to_ONNX_3d_mask, ONNX_inference, ONNX_inference_from_session
+from utils import timer_func
+
+from model2.nodulenet.nodule_net import NoduleNet
+from model2.nodulenet.config import config
+import time
+import SimpleITK as sitk
 
 
+# def ONNX_inference3():
+#     f = rf'C:\Users\test\Desktop\Leon\Datasets\TMH_Nodule-preprocess\nodulenet\crop_old\positive\Image\11029688907433245392075633136616444_000.npy'
+#     crop = np.load(f)
+#     crop = np.tile(crop[np.newaxis, np.newaxis], (1,3,1,1,1))
 
-def ONNX_inference3():
-    f = rf'C:\Users\test\Desktop\Leon\Datasets\TMH_Nodule-preprocess\nodulenet\crop_old\positive\Image\11029688907433245392075633136616444_000.npy'
-    crop = np.load(f)
-    crop = np.tile(crop[np.newaxis, np.newaxis], (1,3,1,1,1))
+#     ort_session = onnxruntime.InferenceSession("nodule_cls.onnx")
+#     ort_inputs = {ort_session.get_inputs()[0].name: crop}
+#     ort_outs = ort_session.run(None, ort_inputs)
 
-    ort_session = onnxruntime.InferenceSession("nodule_cls.onnx")
-    ort_inputs = {ort_session.get_inputs()[0].name: crop}
-    ort_outs = ort_session.run(None, ort_inputs)
-
-    logits = ort_outs[0]
-    prob = np.exp(logits) / np.sum(np.exp(logits))
-    print(logits)
-    print(prob)
+#     logits = ort_outs[0]
+#     prob = np.exp(logits) / np.sum(np.exp(logits))
+#     print(logits)
+#     print(prob)
 
 
 def prepare_model(net, config, use_cuda=True):
@@ -44,42 +49,6 @@ def prepare_model(net, config, use_cuda=True):
     net.use_rcnn = True
 
 
-def NoduleNet_to_ONNX():
-    
-    from model2.nodulenet.nodule_net import NoduleNet
-    from model2.nodulenet.config import config
-    import time
-    import SimpleITK as sitk
-
-    print(time.ctime(time.time()))
-    # dummy_input = torch.ones(1, 1, 64, 64, 64).cuda()
-    # dummy_input2 = torch.randn(1, 1, 64, 64, 64, requires_grad=True).cuda()
-
-    # itkimage = sitk.ReadImage('17004765014077857895660775392470716_clean.nrrd')
-    itkimage = sitk.ReadImage('11029688907433245392075633136616444_clean.nrrd')
-    dummy_input = sitk.GetArrayFromImage(itkimage)
-    # dummy_input = dummy_input[:128, :128, :128]
-    dummy_input, pad = pad2factor(dummy_input)
-
-    # dummy_input = dummy_input[64:192, 64:193, 64:194]
-    # dummy_input = dummy_input[:256, :128, :256]
-    dummy_input = (dummy_input.astype(np.float32) - 128.) / 128.
-    print(dummy_input.min(), dummy_input.max())
-    dummy_input = dummy_input[np.newaxis, np.newaxis]
-    print(dummy_input.shape)
-    # dummy_input = np.tile(dummy_input, (2, 1, 1, 1, 1))
-    # dummy_input = torch.from_numpy(dummy_input).cuda()
-    # dummy_input = torch.from_numpy(dummy_input)
-
-    print(time.ctime(time.time()))
-    
-    torch_model = NoduleNet(config)
-    prepare_model(torch_model, config, use_cuda=False)
-    
-    with torch.no_grad():
-        onnx_model = torch_to_ONNX_3d(dummy_input, torch_model, "nodulenet_v2.onnx")
-
-
 def NoduleCls_to_ONNX():
     f = rf"C:\Users\test\Desktop\Leon\Projects\Nodule_Detection"
     ckpt = rf'C:\Users\test\Desktop\Leon\Projects\Nodule_Detection\nodule_classification\ckpt\important\run_047\4\ckpt_best.pth'
@@ -93,19 +62,7 @@ def NoduleCls_to_ONNX():
     model_builder = NoduleClassifier((32, 64, 64), checkpoint_path=ckpt, using_cuda=False)
     torch_model = model_builder.classifier
     torch_model.eval()
-    onnx_model = torch_to_ONNX_3d(dummy_input, torch_model, "nodule_cls_ones.onnx")
-
-
-def timer_func(func):
-    # This function shows the execution time of 
-    # the function object passed
-    def wrap_func(*args, **kwargs):
-        t1 = time.time()
-        result = func(*args, **kwargs)
-        t2 = time.time()
-        # print(f'Function {func.__name__!r} executed in {(t2-t1):.4f}s')
-        return result, t2-t1
-    return wrap_func
+    onnx_model = torch_to_ONNX_3d(dummy_input, torch_model, "onnx_model/cls.onnx")
 
 
 def nodule_cls_main():
@@ -230,10 +187,8 @@ def nodule_det_main():
 
 
 def NoduleNet_to_ONNX_split():
-    from model2.nodulenet.nodule_net import NoduleNet
-    from model2.nodulenet.config import config
-    import time
-    import SimpleITK as sitk
+    print(f'Torch version: {torch.__version__}')
+    print(f'ONNX version: {onnx.__version__}')
 
     print(time.ctime(time.time()))
     itkimage = sitk.ReadImage('11029688907433245392075633136616444_clean.nrrd')
@@ -265,28 +220,52 @@ def NoduleNet_to_ONNX_split():
     )
                   
     with torch.no_grad():
-        feature_net = torch_to_ONNX_3d(dummy_input, feature_net, "f.onnx")
-        rpn_head = torch_to_ONNX_3d(rpn_input, rpn_head, "r.onnx")
-        rcnn_head = torch_to_ONNX_3d(rcnn_input, rcnn_head, "c_head.onnx")
-        mask_head = torch_to_ONNX_3d_mask(mask_input, mask_head, "m.onnx")
+        feature_net = torch_to_ONNX(
+            dummy_input, feature_net, "onnx_model/f.onnx", output_names=['x', 'out1', 'comb2', 'out2'],
+            dynamic_axes = {
+                    'input' : {0: 'batch_size', 2 : 'depth', 3: 'height', 4: 'width'},
+                    'x' : {0: 'batch_size', 2: 'depth', 3: 'height', 4: 'width'},
+                    'out1' : {0: 'batch_size', 2: 'depth', 3: 'height', 4: 'width'},
+                    'comb2' : {0: 'batch_size', 2: 'depth', 3: 'height', 4: 'width'},
+                    'out2' : {0: 'batch_size', 2: 'depth', 3: 'height', 4: 'width'}
+            }
+        )
+
+        rpn_head = torch_to_ONNX(
+            rpn_input, rpn_head, "onnx_model/rp.onnx", output_names=['logits', 'deltas'],
+            dynamic_axes = {
+                'input' : {0: 'batch_size', 2 : 'depth', 3: 'height', 4: 'width'},
+                'logits' : {0: 'batch_size', 2: 'depth', 3: 'height', 4: 'width'},
+                'deltas' : {0: 'batch_size', 2: 'depth', 3: 'height', 4: 'width'}
+            }
+        )
+
+        rcnn_head = torch_to_ONNX(
+            rcnn_input, rcnn_head, "onnx_model/rc.onnx", output_names=['logits', 'deltas'],
+            dynamic_axes = {
+                'input' : {0: 'batch_size', 2 : 'depth', 3: 'height', 4: 'width'},
+                'logits' : {0: 'batch_size', 2: 'depth', 3: 'height', 4: 'width'},
+                'deltas' : {0: 'batch_size', 2: 'depth', 3: 'height', 4: 'width'}
+            }
+        )
+
+        mask_head = torch_to_ONNX(
+            mask_input, mask_head, "onnx_model/m.onnx", input_names=['crop_f4', 'crop_f2', 'im'],
+            dynamic_axes = {
+                'crop_f4' : {0: 'batch_size', 2: 'depth', 3: 'height', 4: 'width'},
+                'crop_f2' : {0: 'batch_size', 2: 'depth', 3: 'height', 4: 'width'},
+                'im' : {0: 'batch_size', 2 : 'depth', 3: 'height', 4: 'width'},
+                'output' : {0: 'batch_size', 2 : 'depth', 3: 'height', 4: 'width'},
+            }
+        )
 
 
 def main():
     # nodule_det_main()
     # nodule_cls_main()
-    # NoduleNet_to_ONNX()
+    
+    # NoduleCls_to_ONNX()
     NoduleNet_to_ONNX_split()
-
-    # a = torch.zeros((1, 64, 32, 12))
-    # b = torch.LongTensor((12, 13, 17))
-    # c = torch.LongTensor((12, 13, 14))
-    # d = torch.LongTensor((1, 3, 4))
-    # e = torch.arange(a.shape[0])
-    # print(a.max(), a.sum())
-    # a[(e, b, c, d)] = 1
-    # print(a.max(), a.sum())
-    # d = d[:, :, :, c]
-    # print(d)
 
 
 if __name__ == '__main__':

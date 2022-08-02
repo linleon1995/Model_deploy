@@ -127,8 +127,8 @@ class FeatureNet(nn.Module):
         rev2 = self.path2(comb3)
         comb2 = self.back2(torch.cat((rev2, out2), 1))#64+64
 
-        # return x, out1, comb2, out2
-        return [x, out1, comb2], out2
+        return x, out1, comb2, out2
+        # return [x, out1, comb2], out2
 
 class RpnHead(nn.Module):
     def __init__(self, config, in_channels=128):
@@ -218,7 +218,7 @@ class MaskHead(nn.Module):
         for i in range(self.num_class):
             setattr(self, 'logits' + str(i + 1), nn.Conv3d(64, 1, kernel_size=1))
 
-    def forward_single(self, crop_f4, crop_f2, im):
+    def forward(self, crop_f4, crop_f2, im):
         # crop_f2.unsqueeze(0)
         up2 = self.up2(crop_f4)
         up2 = self.back2(torch.cat((up2, crop_f2), 1))
@@ -234,7 +234,7 @@ class MaskHead(nn.Module):
         return out_mask
 
 
-    def forward(self, detections, features):
+    def forwards(self, detections, features):
         img, f_2, f_4 = features  
 
         # Squeeze the first dimension to recover from protection on avoiding split by dataparallel      

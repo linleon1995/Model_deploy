@@ -1,16 +1,15 @@
 import copy
+import sys
 import os
 import argparse
 
 import numpy as np
 import torch
 import onnxruntime
-from ONNX import ONNX_inference_from_session
+import cc3d
 
-# from model2.nodulenet.layer import *
 from model2.nodulenet.layer.rpn_nms import make_rpn_windows, rpn_nms
 from model2.nodulenet.layer.rcnn_nms import rcnn_nms
-# from model2.nodulenet.layer.util import *
 from model2.nodulenet.layer.mask_nms import mask_nms
 from model2.nodulenet.config import config
 from model2.nodulenet.utils.util import (
@@ -18,32 +17,24 @@ from model2.nodulenet.utils.util import (
 from model2.nodulenet.nodule_net import crop_mask_regions, NoduleNet
 from model2.nodulenet.utils.LIDC.preprocess_TMH import (
     load_itk_image, preprocess_op_new, resample2)
-# from deploy_torch import prepare_model
-from utils import timer_func
+from utils import timer_func, ONNX_inference_from_session
 from nodule_to_nrrd import seg_nrrd_write
 
 
 parser = argparse.ArgumentParser() 
-parser.add_argument('--input', type=str, required=True,  help='Input file')
+parser.add_argument(
+    '--input', type=str, required=True,  help='Input file')
 
+parser.add_argument(
+    '--model-dir', type=str, default=None, required=False, help='The ONNX model directory')
 
-# def prepare_model(net, config, use_cuda=True):
-#     if use_cuda:
-#         net.cuda()
-#     initial_checkpoint = config['initial_checkpoint']
-#     # checkpoint = torch.load(initial_checkpoint)
-#     # TODO: GPU to CPU
-#     print(os.getcwd())
-#     checkpoint = torch.load(initial_checkpoint, map_location=lambda storage, loc: storage)
-#     net.load_state_dict(checkpoint['state_dict'], strict=True)
-#     net.set_mode('eval')
-#     net.use_mask = True
-#     net.use_rcnn = True
+parser.add_argument(
+    '--pred-dir', type=str, default=None, required=False, help='The nodule egmentation saving directory')
 
 
 @timer_func
 def model_inference(
-    cfg, inputs, feature_net_session, rpn_session, rcnn_session, mask_session, nodule_cls_session, 
+    cfg, inputs, feature_net_session, rpn_session, rcnn_session, mask_session, 
     rcnn_crop, filename):
     mode = 'eval'
     use_rcnn = True
@@ -134,18 +125,24 @@ def model_inference(
             detections = detections[mask_keep]
             # mask_probs = mask_probs[mask_keep]
 
-            # out_masks = []
-            # for keep_idx in mask_keep:
-            #     out_masks.append(mask_probs[keep_idx])
-            # mask_probs = out_masks
+            out_masks = []
+            weight = []
+            for mask_prob in mask_probs:
+                out_masks.append(mask_prob.float())
+                weight.append(mask_prob>0)
+            pred_mask = torch.stack(out_masks, dim=0)
+            weight = torch.stack(weight, dim=0)
+            pred_mask = torch.sum(pred_mask, dim=0) / torch.sum(weight, dim=0)
+            pred_mask = torch.where(torch.sigmoid(pred_mask)>0.5, 1, 0)
             
-            # pred_mask = crop_mask_regions(mask_probs, crop_boxes, features[0].shape)
-            mask_probs = crop_mask_regions(mask_probs, crop_boxes)
-            # segments = [torch.sigmoid(m) for m in mask_probs]
-            segments = [torch.sigmoid(m) > 0.5 for m in mask_probs]
-            pred_mask = crop_boxes2mask_single(crop_boxes[:, 1:], segments, inputs.shape[2:])
+            # # pred_mask = crop_mask_regions(mask_probs, crop_boxes, features[0].shape)
+            # mask_probs = crop_mask_regions(mask_probs, crop_boxes)
+            # # segments = [torch.sigmoid(m) for m in mask_probs]
+            # segments = [torch.sigmoid(m) > 0.5 for m in mask_probs]
+            # pred_mask = crop_boxes2mask_single(crop_boxes[:, 1:], segments, inputs.shape[2:])
     
     pred_mask = pred_mask.numpy()
+    pred_mask = cc3d.connected_components(pred_mask , 26)
     return pred_mask
 
 
@@ -257,20 +254,24 @@ def save_seg_nrrd(filename, ct_scan, direction, spacing, origin):
 def main():
     input_file = args.input
     nodulenet = NoduleNet(config)
-    pred_folder = 'predict'
-    model_folder = 'model'
-    os.makedirs(pred_folder, exist_ok=True)
+    exe_path = os.path.dirname(sys.executable)
+    model_dir = args.model_dir if args.model_dir is not None else os.path.join(exe_path, 'model')
+    pred_dir = args.pred_dir if args.pred_dir is not None else os.path.join(exe_path, 'predict')
+    os.makedirs(pred_dir, exist_ok=True)
 
     feature_net_session = onnxruntime.InferenceSession(
-        os.path.join(model_folder, "f.onnx"))
+        os.path.join(model_dir, "f.onnx"))
     rpn_head_session = onnxruntime.InferenceSession(
-        os.path.join(model_folder, "rp.onnx"))
+        os.path.join(model_dir, "rp.onnx"))
     rcnn_head_session = onnxruntime.InferenceSession(
-        os.path.join(model_folder, "rc.onnx"))
+        os.path.join(model_dir, "rc.onnx"))
     mask_head_session = onnxruntime.InferenceSession(
-        os.path.join(model_folder, "m.onnx"))
-    nodule_cls_session = onnxruntime.InferenceSession(
-        os.path.join(model_folder, "cls.onnx"))
+        os.path.join(model_dir, "m.onnx"))
+    if os.path.exists(os.path.join(model_dir, "cls.onnx")):
+        nodule_cls_session = onnxruntime.InferenceSession(
+            os.path.join(model_dir, "cls.onnx"))
+    else:
+        nodule_cls_session = None
     rcnn_crop = nodulenet.rcnn_crop
 
     input_image, origin, spacing, direction = load_itk_image(input_file)
@@ -285,11 +286,12 @@ def main():
     filename = os.path.split(input_file)[1][:-4]
     onnx_pred, onnx_time = model_inference(
         config, preprocess_input, feature_net_session, rpn_head_session, 
-        rcnn_head_session, mask_head_session, nodule_cls_session, rcnn_crop, filename
+        rcnn_head_session, mask_head_session, rcnn_crop, filename
     )
 
     # Nodule classification
-    cls_pred, cls_time = nodule_cls(preprocess_input[0, 0], onnx_pred, nodule_cls_session)
+    if nodule_cls_session is not None:
+        onnx_pred, cls_time = nodule_cls(preprocess_input[0, 0], onnx_pred, nodule_cls_session)
 
     # Post processing
     @timer_func
@@ -298,21 +300,15 @@ def main():
         post_pred = recover_lung_box(post_pred, lung_box, shape_before_lung_box)
         final_pred = resample_back(post_pred, np.ones(3, np.float), spacing)
         return final_pred
-    final_pred, post_time = post_process(cls_pred)
+    final_pred, post_time = post_process(onnx_pred)
 
     # Output segmentation result
-    # folder = os.path.join(os.path.dirname(__file__), 'predict')
-    # print(folder, filename)
-    pred_f = os.path.dirname(os.path.realpath(__file__))
-    import sys
-    print()
-    print('ddd', sys.argv[0])
-    print('ddd', sys.executable)
-    save_seg_nrrd(os.path.join(sys.executable, pred_folder, filename), final_pred, direction, spacing, origin)
-    # save_seg_nrrd(filename, final_pred, direction, spacing, origin)
+    # if not nodule_cls_session:
+    #     filename = f'{filename}_no_cls'
+    save_seg_nrrd(os.path.join(pred_dir, filename), final_pred, direction, spacing, origin)
 
 
 if __name__ == '__main__':
-    args = parser.parse_args()
+    args, unparsed = parser.parse_known_args()
     main()
     
