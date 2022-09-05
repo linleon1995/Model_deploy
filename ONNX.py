@@ -7,11 +7,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-# class ONNX_exporter():
-#     def __init__(self):
-#         pass
-
-
 def to_numpy(tensor):
     return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
 
