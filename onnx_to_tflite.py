@@ -1,18 +1,44 @@
 from fileinput import filename
 import os
+import glob
+from random import sample
 
+import onnx
 from onnx_tf.backend import prepare
+import onnxruntime
 import numpy as np
 import tensorflow as tf
-import onnx
+import matplotlib.pyplot as plt
+import pandas as pd
 
-from onnx_model import ONNX_inference
+# from onnx_model import ONNX_inference
+
+
+
+def ONNX_inference(inputs, onnx_model):
+    """AI is creating summary for ONNX_inference
+
+    Args:
+        inputs ([type]): [description]
+        onnx_model ([type]): [description]
+
+    Returns:
+        [type]: [description]
+    """
+    ort_session = onnxruntime.InferenceSession(onnx_model)
+    # compute ONNX Runtime output prediction
+    input_names = ort_session.get_inputs()
+    assert len(inputs) == len(input_names)
+    ort_inputs = {
+        input_session.name: input_data for input_session, input_data in zip(input_names, inputs)}
+    ort_outs = ort_session.run(None, ort_inputs)
+    return ort_outs
 
 
 def onnx_to_tf(onnx_path, tf_path):
-    # onnx_model = onnx.load(onnx_path)
-    # tf_rep = prepare(onnx_model)
-    # tf_rep.export_graph(tf_path)
+    onnx_model = onnx.load(onnx_path)
+    tf_rep = prepare(onnx_model)
+    tf_rep.export_graph(tf_path)
 
     test_onnx_to_tf(onnx_path, tf_path)
 
@@ -35,22 +61,48 @@ def test_onnx_to_tf(onnx_path, tf_path):
     error = check_error(onnx_output, tf_output)
 
 
+def tf_to_tflite(tf_path, tflite_path):
+    converter = tf.lite.TFLiteConverter.from_saved_model(tf_path)
+    converter.target_spec.suppoted_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+    # converter.target_spec.supported_ops = [
+        # tf.lite.OpsSet.TFLITE_BUILTINS, tf.lite.OpsSet.SELECT_TF_OPS]
+    converter.allow_custom_ops = True
+    converter.experimental_new_converter = True
+    converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    tf_lite_model = converter.convert()
+    with open(tflite_path, 'wb') as f:
+        f.write(tf_lite_model)
+
+    # Define input
+    # TODO: Set shape automatically? or define outside
+    inputs = np.ones((1, 3, 128, 59), dtype=np.float32)
+    error = test_tf_to_tflite(inputs, tf_path, tflite_path)
+    return error
+    
+
+def test_tf_to_tflite(inputs, tf_path, tflite_path):
+    # Get TF output
+    new_model = tf.saved_model.load(tf_path)
+    infer = new_model.signatures["serving_default"]
+    output = infer(tf.constant(inputs))
+    tf_output = output['output'].numpy()
+
+    # Get TF-lite output
+    interpreter = build_tflite(tflite_path, inputs.shape)
+    tflite_output = tflite_inference(inputs, interpreter)
+
+    # Check error
+    # error = check_error(tf_output, tflite_output)
+    # return error
+
+    return (tf_output, tflite_output)
+
+
 def check_error(output1, output2):
     error = output1 - output2
     print(error.max(), error.min(), np.abs(error).sum())
     np.testing.assert_allclose(output1, output2, rtol=1e-03, atol=1e-5)
     return error
-
-
-def tf_to_tflite(tf_path, tflite_path):
-    converter = tf.lite.TFLiteConverter.from_saved_model(tf_path)
-    converter.target_spec.suppoted_ops = [tf.lite.OpsSet.TFLITE_BUILTINS, tf.lite.OpsSet.SELECT_TF_OPS]
-    converter.allow_custom_ops=True
-    converter.experimental_new_converter =True
-    converter.optimizations = [tf.lite.Optimize.DEFAULT]
-    tf_lite_model = converter.convert()
-    with open(tflite_path, 'wb') as f:
-        f.write(tf_lite_model)
 
 
 def onnx_to_tflite():
@@ -73,53 +125,91 @@ def onnx_to_tflite():
     open(tflite_path, "wb").write(tflite_rep)
 
 
-def tflite_inference(tflite_path):
-    # Load the TFLite model and allocate tensors.
-    interpreter = tf.lite.Interpreter(model_path=tflite_path)
-    interpreter.allocate_tensors()
-
+def tflite_inference(inputs, interpreter):
     # Get input and output tensors.
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
 
     # Test the model on random input data.
-    input_shape = input_details[0]['shape']
-    input_data = np.array(np.random.random_sample(input_shape), dtype=np.float32)
-    interpreter.set_tensor(input_details[0]['index'], input_data)
-
+    # input_shape = input_details[0]['shape']
+    # input_data = np.array(np.random.random_sample(input_shape), dtype=np.float32)
+    interpreter.set_tensor(input_details[0]['index'], tf.constant(inputs))
     interpreter.invoke()
 
     # The function `get_tensor()` returns a copy of the tensor data.
     # Use `tensor()` in order to get a pointer to the tensor.
     output_data = interpreter.get_tensor(output_details[0]['index'])
-    print(output_data)
+    return output_data
+
+
+def build_tflite(tflite_path, input_shape):
+    # Load the TFLite model and allocate tensors.
+    interpreter = tf.lite.Interpreter(model_path=tflite_path)
+    interpreter.resize_tensor_input(0, input_shape, strict=True)
+    interpreter.allocate_tensors()
+    # interpreter.invoke()
+    return interpreter
+
+
+def snoring_tf_tflite_testing(tf_path, tflite_path):
+    # inputs = np.ones((1, 3, 128, 59), dtype=np.float32)
+    data_dir = r'C:\Users\test\Desktop\Leon\Datasets\ASUS_snoring_cpp\2_21_2s_my2\csv\test'
+    files = glob.glob(os.path.join(data_dir, '*.csv'))
+    rand_files = sample(files, 50)
+    total_tf, total_tflite = [], []
+    for idx, f in enumerate(rand_files):
+        # if idx > 1: break
+        print(idx, f)
+        # data = np.load(f)
+        df = pd.read_csv(f, header=None)
+        data = df.to_numpy()
+        data = data.T
+        data = np.float32(np.tile(data[None, None], (1, 3, 1, 1)))
+        (tf_output, tflite_output) = test_tf_to_tflite(data, tf_path, tflite_path)
+        total_tf.append(tf_output)
+        total_tflite.append(tflite_output)
+
+    total_tf = np.concatenate(total_tf, axis=0)
+    total_tflite = np.concatenate(total_tflite, axis=0)
+    error = np.abs(total_tf-total_tflite)
+
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(16, 9), dpi=1000)
+    ax1.plot(total_tf[:,0], 'dodgerblue', label='tf')
+    ax1.plot(total_tflite[:,0], 'limegreen', label='tflite')
+    ax1.set_title('Non-snoring probability')
+    # ax1.set_xlabel('sample')
+    ax1.set_ylabel('value')
+    ax1.legend()
+
+    ax2.plot(total_tf[:,1], 'dodgerblue', label='tf')
+    ax2.plot(total_tflite[:,1], 'limegreen', label='tflite')
+    ax2.set_title('Snoring probability')
+    # ax2.set_xlabel('sample')
+    ax2.set_ylabel('value')
+    ax2.legend()
+
+    ax3.plot(error[:,0], 'lightcoral', label='absolute difference (non-snoring)')
+    ax3.plot(error[:,1], 'mediumorchid', label='absolute difference (snoring)')
+    ax3.set_title('Absolute difference')
+    ax3.set_xlabel('sample')
+    ax3.set_ylabel('value')
+    ax3.legend()
+    fig.savefig('tf_tflite_valid_value.png')
+
 
 
 def main():
-    onnx_path = r'C:\Users\test\Desktop\Leon\Projects\Snoring_Detection\checkpoints\run_018\snoring.onnx'
+    onnx_path = r'C:\Users\test\Desktop\Leon\Projects\Snoring_Detection\checkpoints\run_082 \snoring.onnx'
+    # onnx_path = r'C:\Users\test\Desktop\Leon\Projects\Snoring_Detection\checkpoints\run_050\tf-2.9.0\snoring.onnx'
     _dir, filename = os.path.split(onnx_path)
     tf_path = os.path.join(_dir, filename.split('.')[0])
     tflite_path = os.path.join(_dir, filename.replace('.onnx', '.tflite'))
 
     onnx_to_tf(onnx_path, tf_path)
-    # tf_to_tflite(tf_path, tflite_path)
+    tf_to_tflite(tf_path, tflite_path)
     # tflite_inference(tflite_path)
+    snoring_tf_tflite_testing(tf_path, tflite_path)
     
-    # # new_model = tf.saved_model.load(tf_path)
-    # new_model = tf.keras.models.load_model(tf_path)
-    # infer = new_model.signatures["serving_default"]
-    # for v in infer.trainable_variables:
-    #     print(v.name)
-
-    # MODEL_PB = os.path.join(tf_path, 'saved_model.pb')
-    # from tensorflow.python.platform import gfile
-    
-    # # graph_def = tf.get_default_graph().as_graph_def()
-    # # with gfile.FastGFile(MODEL_PB, 'rb') as f:
-    # #     graph_def.ParseFromString(f.read())
-    # # tf.import_graph_def(graph_def, name='')
-
-    # onnx_to_tflite()
 
 
 if __name__ == '__main__':
