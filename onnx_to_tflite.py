@@ -69,9 +69,12 @@ def tf_to_tflite(tf_path, tflite_path):
     # # TFlite OPs
     converter.target_spec.suppoted_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
 
-    # # # TFlite OPs + Tensorflow OPs
-    # # converter.target_spec.supported_ops = [
-    # #     tf.lite.OpsSet.TFLITE_BUILTINS, tf.lite.OpsSet.SELECT_TF_OPS]
+    # # TFlite OPs + Tensorflow OPs
+    # converter.target_spec.supported_ops = [
+    #     tf.lite.OpsSet.TFLITE_BUILTINS, tf.lite.OpsSet.SELECT_TF_OPS]
+
+    # Dynamic range quantization
+    converter.optimizations = [tf.lite.Optimize.DEFAULT]
 
     tf_lite_model = converter.convert()
     with open(tflite_path, 'wb') as f:
@@ -162,18 +165,18 @@ def build_tflite(tflite_path, input_shape):
 
 
 def snoring_tf_tflite_testing(tf_path, tflite_path):
-    # inputs = np.ones((1, 3, 128, 59), dtype=np.float32)
-    data_dir = r'C:\Users\test\Desktop\Leon\Datasets\ASUS_snoring_cpp\2_21_2s_my2\csv\test'
-    files = glob.glob(os.path.join(data_dir, '*.csv'))
-    rand_files = sample(files, 50)
+    # # inputs = np.ones((1, 3, 128, 59), dtype=np.float32)
+    # data_dir = r'C:\Users\test\Desktop\Leon\Datasets\ASUS_snoring_cpp\2_21_2s_my2\csv\test'
+    # files = glob.glob(os.path.join(data_dir, '*.csv'))
+    # rand_files = sample(files, 50)
 
     data_dir = r'C:\Users\test\Desktop\Leon\Datasets\test\web_snoring_pre\pixel_0908_2\data'
     files = glob.glob(os.path.join(data_dir, '*.wav'))
-    rand_files = sample(files, 50)
+    # files = sample(files, 50)
 
     total_tf, total_tflite = [], []
-    for idx, f in enumerate(rand_files):
-        if idx > 20: break
+    for idx, f in enumerate(files):
+        if idx > 2: break
         # print(idx, f)
         # # data = np.load(f)
         # df = pd.read_csv(f, header=None)
@@ -240,7 +243,7 @@ def main():
     tflite_path = str(onnx_path.with_suffix('.tflite'))
 
     # onnx_to_tf(str(onnx_path), tf_path)
-    tf_to_tflite(tf_path, tflite_path)
+    # tf_to_tflite(tf_path, tflite_path)
     snoring_tf_tflite_testing(tf_path, tflite_path)
     
 
