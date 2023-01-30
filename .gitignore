@@ -3,6 +3,21 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Data
+*.npy
+*.nrrd
+*.raw
+*.mhd
+
+# Model
+*.onnx
+*.pt
+*.ckpt
+
+# Image
+*.jpg
+*.png
+
 # C extensions
 *.so
 

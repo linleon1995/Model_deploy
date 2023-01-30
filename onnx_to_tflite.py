@@ -1,19 +1,19 @@
-from fileinput import filename
 import os
 import glob
-from random import sample
 from pathlib import Path
+# XXX: temp
+from datetime import datetime
 
-import onnx
-from onnx_tf.backend import prepare
-import onnxruntime
-import numpy as np
-import tensorflow as tf
-import matplotlib.pyplot as plt
-import pandas as pd
 import torchaudio
-# from onnx_model import ONNX_inference
+import pandas as pd
+import matplotlib.pyplot as plt
+import tensorflow as tf
+import numpy as np
+import onnxruntime
+from onnx_tf.backend import prepare
+import onnx
 
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 
 def ONNX_inference(inputs, onnx_model):
@@ -75,6 +75,7 @@ def tf_to_tflite(tf_path, tflite_path):
 
     # Dynamic range quantization
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    converter.target_spec.supported_types = [tf.float16]
 
     tf_lite_model = converter.convert()
     with open(tflite_path, 'wb') as f:
@@ -88,7 +89,7 @@ def tf_to_tflite(tf_path, tflite_path):
     (tf_output, tflite_output) = test_tf_to_tflite(inputs, tf_path, tflite_path)
     error = check_error(tf_output, tflite_output)
     return error
-    
+
 
 def test_tf_to_tflite(inputs, tf_path, tflite_path):
     # Get TF output
@@ -155,7 +156,7 @@ def tflite_inference2(inputs, interpreter):
     output_data = classify_lite(input=inputs)['output']
     return output_data
 
-    
+
 def build_tflite(tflite_path, input_shape):
     # Load the TFLite model and allocate tensors.
     interpreter = tf.lite.Interpreter(model_path=tflite_path)
@@ -176,7 +177,8 @@ def snoring_tf_tflite_testing(tf_path, tflite_path):
 
     total_tf, total_tflite = [], []
     for idx, f in enumerate(files):
-        if idx > 2: break
+        if idx > 20:
+            break
         # print(idx, f)
         # # data = np.load(f)
         # df = pd.read_csv(f, header=None)
@@ -201,22 +203,24 @@ def snoring_tf_tflite_testing(tf_path, tflite_path):
     error = np.abs(total_tf-total_tflite)
 
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(16, 9), dpi=1000)
-    ax1.plot(total_tf[:,0], 'dodgerblue', label='tf')
-    ax1.plot(total_tflite[:,0], 'limegreen', label='tflite')
+    ax1.plot(total_tf[:, 0], 'dodgerblue', label='tf')
+    ax1.plot(total_tflite[:, 0], 'limegreen', label='tflite')
     ax1.set_title('Non-snoring probability')
     # ax1.set_xlabel('sample')
     ax1.set_ylabel('value')
     ax1.legend()
 
-    ax2.plot(total_tf[:,1], 'dodgerblue', label='tf')
-    ax2.plot(total_tflite[:,1], 'limegreen', label='tflite')
+    ax2.plot(total_tf[:, 1], 'dodgerblue', label='tf')
+    ax2.plot(total_tflite[:, 1], 'limegreen', label='tflite')
     ax2.set_title('Snoring probability')
     # ax2.set_xlabel('sample')
     ax2.set_ylabel('value')
     ax2.legend()
 
-    ax3.plot(error[:,0], 'lightcoral', label='absolute difference (non-snoring)')
-    ax3.plot(error[:,1], 'mediumorchid', label='absolute difference (snoring)')
+    ax3.plot(error[:, 0], 'lightcoral',
+             label='absolute difference (non-snoring)')
+    ax3.plot(error[:, 1], 'mediumorchid',
+             label='absolute difference (snoring)')
     ax3.set_title('Absolute difference')
     ax3.set_xlabel('sample')
     ax3.set_ylabel('value')
@@ -224,13 +228,13 @@ def snoring_tf_tflite_testing(tf_path, tflite_path):
     fig.savefig('tf_tflite_valid_value.png')
 
 
-
 def main():
     # onnx_path = r'C:\Users\test\Desktop\Leon\Projects\Snoring_Detection\checkpoints\run_516\pann_MobileNetV2_run_516.onnx'
     onnx_path = r'C:\Users\test\Desktop\Leon\Projects\Snoring_Detection\checkpoints\run_741\pann.ResNet38_run_741.onnx'
     onnx_path = r'C:\Users\test\Desktop\Leon\Projects\Snoring_Detection\checkpoints\run_727\pann.MobileNetV2_run_727.onnx'
     onnx_path = r'C:\Users\test\Desktop\Leon\Projects\Snoring_Detection\checkpoints\run_777\pann.MobileNetV2_run_777.onnx'
-    onnx_path = r'C:\Users\test\Desktop\Leon\Projects\Snoring_Detection\checkpoints\run_813\pann.MobileNetV2_run_813.onnx'
+    onnx_path = r'C:\Users\test\Desktop\Leon\Projects\Snoring_Detection\checkpoints\run_815\pann.MobileNetV2_run_815.onnx'
+    onnx_path = r'C:\Users\test\Desktop\Leon\Projects\Snoring_Detection\checkpoints\run_817\pann.MobileNetV2_run_817.onnx'
     # onnx_path = r'C:\Users\test\Desktop\Leon\Projects\Snoring_Detection\checkpoints\run_780\pann.ResNet38_run_780.onnx'
     # onnx_path = r'C:\Users\test\Desktop\Leon\Projects\Snoring_Detection\checkpoints\run_723\pann.MobileNetV2_run_723.onnx'
     # onnx_path = r'C:\Users\test\Desktop\Leon\Projects\Snoring_Detection\checkpoints\run_722\pann.ResNet54_run_722.onnx'
@@ -245,7 +249,6 @@ def main():
     # onnx_to_tf(str(onnx_path), tf_path)
     # tf_to_tflite(tf_path, tflite_path)
     snoring_tf_tflite_testing(tf_path, tflite_path)
-    
 
 
 if __name__ == '__main__':
